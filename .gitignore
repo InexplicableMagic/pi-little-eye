@@ -1,0 +1,5 @@
+cam-env/
+security_cam_state.sqlite
+__pycache__
+/*.jpg
+/*.png

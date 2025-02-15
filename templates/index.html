@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="robots" content="noindex">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="{{ url_for('static', filename='js/script.js')}}"></script> 
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/main.css')}}">
+    <title>Live Video Stream with Timestamp</title>
+</head>
+<body>
+    <div id="video-container">
+    <h1>Live Video Stream with Timestamp</h1>
+    </div>
+    <div id="set-initial-admim-password">
+    	  <p>Set Admin Username and Password</p>
+      <input id="setInitialUsername" placeholder="admin user name">
+	  <input type="password" id="setInitialPasswordText1" placeholder="Enter password">
+	  <input type="password" id="setInitialPasswordText2" placeholder="Confirm password">
+	  <p id="setInitialPassMessage"></p>
+	  <button id="setInitialPassButton" disabled>Set Password</button>
+    </div>
+    <div id="login">
+      <p>Login</p>
+      <input id="loginUsername" placeholder="user name">
+	  <input type="password" id="loginPassword" placeholder="password">
+	  <button id="loginButton">Authenticate</button>
+	  <p id="loginMessage"></p>
+    </div>
+    <div id="configuration">
+    <p>Configuration</p>
+        <div id="admin-only-config">
+            <button onclick="saveConfig();" id="config-save-changes-button">Save Changes</button>
+            <input type="radio" id="any-ip-radio" name="ips-allowed" value="any-ip" checked>
+            <label for="any-ip">Any IP can access camera</label><br/>
+            <input type="radio" id="allowed-ips-radio" name="ips-allowed" value="allowed-ips">
+            <label for="allowed-ips">Only below IP ranges can access camera</label><br/>
+            <textarea id="allowed-ip-list" name="allowed-ip-list" placeholder="192.168.*" rows="4" cols="25"></textarea>
+            <label for="allowed-ip-list">List of allowed IP ranges:</label>
+            <button onclick="saveConfig();" id="config-save-changes-button">Save Changes</button>
+            <div id="user-list-table">
+            
+            </div>
+        </div>
+        <div id="standard-config">
+            <p>Change current user password:</p>
+            <input type="password" id="changeOriginalText" placeholder="Original password">            
+            <input type="password" id="changePassText1" placeholder="New password">
+            <input type="password" id="changePassText2" placeholder="Confirm new password">
+            <button id="change-user-pass-button">Change Password</button>
+        </div>
+    </div>
+    <script>var csrfToken = "{{ csrf_token }}";</script>
+    <script>resetConfigOnUI(); </script>
+    <script>addEventListeners();</script>
+    <script>get_auth_state();</script>
+</body>
+</html>
