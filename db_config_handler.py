@@ -15,6 +15,8 @@ class DBConfigHandler:
     MAX_PASS_LENGTH = 100
     MAX_USERNAME_LENGTH = 100
     VALID_PERMISSIONS = ['admin', 'viewer']
+    IPV4_WILDCARD_PATTERN = r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$|^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){0,3}\*$'
+    IPV6_WILDCARD_PATTERN = r'^(?:(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|(?:(?:[a-fA-F\d]{1,4})\:){0,7}(?:\*|(?:[a-fA-F\d]{1,3})\*))$'
     
     def __init__(self, db_path):
         self.db_path = db_path
@@ -35,6 +37,8 @@ class DBConfigHandler:
                 permissions TEXT NOT NULL,
                 pass_bcrypt TEXT NOT NULL,
                 salt TEXT NOT NULL,
+                disabled BOOLEAN NOT NULL DEFAULT FALSE,
+                bad_pass_attempts INTEGER NOT NULL DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -81,9 +85,11 @@ class DBConfigHandler:
             self.insert_or_update_parameter( 'auth_state', 'string', 'nopass' )
             # Enforce an initial IP whitelist for local IPs only until the user has has time to set the password
             self.insert_or_update_parameter( 'enforce_ip_whitelist', 'bool', True )
-            self.set_ip_allow_list( [ '192.168.*', '10.*', '172.16.*', 'fd00:*', '127.0.0.1' ], [] )
-            # Expire user login sessions initially after 30 days
+            self.set_ip_allow_list( [ '192.168.*', '10.*', '172.16.*', 'fc*', 'fd*', '127.0.0.1' ], [] )
+            # Expire user login sessions initially after 30 days - forces password re-entry after this number of days
             self.insert_or_update_parameter( 'max_session_age', 'int', 30 )
+            # Disable non-admin accounts after this number of bad password attempts in a row
+            self.insert_or_update_parameter( 'disable_account_after_bad_pass_attempts', 'int', 10 )
 
         ip_lists = self.get_ip_allow_list()
         self.ip_response = dict()
@@ -98,15 +104,50 @@ class DBConfigHandler:
         else:
             return False
     
-    #Is it a valid IP range e.g. 192.168.*
+    #Is it a valid IP range e.g. 192.168.* or fc00:*
     def is_valid_ipv4_or_ipv6_wildcard_range(ip_address):
-        ipv4_pattern = r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$|^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){0,3}\*$'
-        ipv6_pattern = r'^(?:(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,7}\*)$'
+        ip_address = ip_address.strip().lower()
+        if ip_address is None:
+            return False
+        if len(ip_address) < 1:
+            return False
+        # Don't allow wildcarding everything
+        if ip_address == '*':
+            return False
         
-        if re.match(ipv4_pattern, ip_address) or re.match(ipv6_pattern, ip_address):
+        if re.match(DBConfigHandler.IPV4_WILDCARD_PATTERN, ip_address) or re.match(DBConfigHandler.IPV6_WILDCARD_PATTERN, ip_address):
             return True
         
         return False
+        
+    # Assumes a valid ipv6 address otherwise returns itself
+    def expand_ipv6_with_wildcard(ip_address):
+        ip_address = ip_address.strip().lower()
+        try:
+            if ':' in ip_address:
+                expanded_addess = [  ]
+                ip_address_parts = ip_address.split(':')
+                for part in ip_address_parts:
+                    if '*' not in part:
+                        part_len = len(part)
+                        if part_len > 4:
+                            return None
+                        if part_len == 0:
+                            expanded_addess.append( '0000' )
+                        elif part_len == 4:
+                            expanded_addess.append( part )
+                        else:
+                            expanded_addess.append( str(('0'*(4-part_len)))+part )
+                            
+                    else:
+                        expanded_addess.append( part )
+               
+                return ':'.join( expanded_addess )
+        except Exception as e:
+            return ip_address
+            
+        return ip_address
+        
     
     # Is it a valid whole IP address (either IPv4 or IPv6)
     def is_valid_ip_address(ip_address):
@@ -115,6 +156,15 @@ class DBConfigHandler:
             return True
         except ValueError:
             return False
+    
+    #Expands out condensed IPV6 addresses and does nothing to IPV4
+    #Also checks the IP is valid and returns None if not
+    def explode_ipv6( addr ):
+        try:
+            addr = ipaddress.ip_address(addr)
+            return addr.exploded
+        except Exception as e:
+            return None
     
     
     def ip_matches_wildcard_list(ip_to_check, wildcard_list):
@@ -127,7 +177,8 @@ class DBConfigHandler:
         if len(ip_to_check) < 1 or len(ip_to_check) > 39:
             return False
         
-        if not DBConfigHandler.is_valid_ip_address( ip_to_check ):
+        ip_to_check = DBConfigHandler.explode_ipv6( ip_to_check )
+        if ip_to_check is None:
             return False
         
         for ip_range in wildcard_list:
@@ -199,11 +250,20 @@ class DBConfigHandler:
             return False
         if not DBConfigHandler.validate_utf8_string( test_password, max_length=DBConfigHandler.MAX_PASS_LENGTH ):
             return False
+        
+        username = username.lower()
+        if not self.test_user_exists( username ):
+            return False
+            
         pass_result = self.get_pass_auth( username );
         if pass_result is not None:
             pass_bcrypt, salt = pass_result;
             if DBConfigHandler.test_bcrypt_password( test_password, pass_bcrypt, salt ):
+                self.increment_reset_bad_pass_attempts( username, reset=True )
                 return True
+            else:
+                self.increment_reset_bad_pass_attempts( username )
+                pass
         return False
 
 
@@ -362,21 +422,32 @@ class DBConfigHandler:
         
     def test_user_exists( self, username ):
         if DBConfigHandler.validate_utf8_string( username, max_length=DBConfigHandler.MAX_USERNAME_LENGTH ):
-            if self.get_pass_auth( username ) is not None:
-                return True
-        
-        return False
+            try:
+                conn = self.read_only_connection()
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM authentication WHERE username = ?", (username,))
+                result = cursor.fetchone()[0]
+                return result > 0
+            except Exception as e:
+                print(f"An error occurred  (test_user_exists): {e}")
+                return False   
+            finally:
+                if conn:
+                    conn.close()
    
     def get_pass_auth( self, username ):
         conn = None
         try:
             if not DBConfigHandler.validate_utf8_string( username, max_length=DBConfigHandler.MAX_USERNAME_LENGTH ):
                 raise ValueError( "Username is invalid" )
+            
+            max_bad_pass_attempts = int( self.get_parameter_value( 'disable_account_after_bad_pass_attempts' ) )
                 
             username = username.lower()
-            conn = self.read_only_connection()
+            conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            query_exists = "SELECT pass_bcrypt, salt FROM authentication WHERE username = ?"
+            cursor.execute("UPDATE authentication SET disabled=TRUE WHERE bad_pass_attempts >= ? AND permissions != 'admin'", (max_bad_pass_attempts,))
+            query_exists = "SELECT pass_bcrypt, salt FROM authentication WHERE username = ? AND disabled = FALSE"
             cursor.execute(query_exists, (username,))
             result = cursor.fetchone()
             return result            
@@ -398,8 +469,12 @@ class DBConfigHandler:
                     a.username,
                     a.permissions,
                     CASE
-                        WHEN MAX(s.username) IS NOT NULL THEN 'true'
-                        ELSE 'false'
+                        WHEN a.disabled == 1 THEN 'yes'
+                        ELSE 'no'
+                    END AS disabled,
+                    CASE
+                        WHEN MAX(s.username) IS NOT NULL THEN 'yes'
+                        ELSE 'no'
                     END AS has_active_session
                 FROM 
                     authentication a
@@ -412,7 +487,7 @@ class DBConfigHandler:
             result = cursor.fetchall()
             result_obj = [  ]
             for user_data in result:
-                result_obj.append( { 'username': user_data[0], 'permissions': user_data[1], 'active_sessions': user_data[2] } )
+                result_obj.append( { 'username': user_data[0], 'permissions': user_data[1], 'disabled': user_data[2], 'active_sessions': user_data[3] } )
             return result_obj            
         except Exception as e:
             print(f"An error occurred (list_all_username): {e}")
@@ -443,6 +518,34 @@ class DBConfigHandler:
         finally:
             if conn:
                 conn.close()
+
+    # Increments the count of bad password attempts for the user.
+    # Used for locking accounts on too many bad pass attempts
+    # Doesn't lock admin accounts which are required to re-enable locked out users
+    # If reset is True then resets the count to zero
+    def increment_reset_bad_pass_attempts( self, username, reset = False ):
+        conn = None
+        try:
+            if not DBConfigHandler.validate_utf8_string( username, max_length=DBConfigHandler.MAX_USERNAME_LENGTH ):
+                raise ValueError( "Username is invalid" )
+            username = username.lower()
+            max_bad_pass_attempts = int( self.get_parameter_value( 'disable_account_after_bad_pass_attempts' ) )
+
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            if reset:
+                cursor.execute('UPDATE authentication SET bad_pass_attempts = 0 WHERE username = ?', (username,))
+            else:
+                cursor.execute('UPDATE authentication SET bad_pass_attempts = bad_pass_attempts + 1 WHERE username = ?', (username,))
+                cursor.execute("UPDATE authentication SET disabled=TRUE WHERE bad_pass_attempts >= ? AND permissions != 'admin'", (max_bad_pass_attempts,))
+            conn.commit()
+        except Exception as e:
+            print(f"An error occurred (increment_reset_bad_pass): {e}")
+            return False 
+        finally:
+            if conn:
+                conn.close()    
+            
 
     def set_pass( self, username, permissions, new_pass ):
         conn = None
@@ -570,6 +673,9 @@ class DBConfigHandler:
                 raise ValueError( "Username is invalid" )
             
             username = username.lower()
+            if not self.test_user_exists( username ):
+                raise ValueError( "Username does not exist" )
+                
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             delete_sessions = "DELETE FROM sessions where username = ?"
@@ -703,6 +809,17 @@ class DBConfigHandler:
                 return False
             if not isinstance(config_object['enforce_ip_whitelist'], bool):
                 return False
+            
+            normalised_whitelisted = []
+            for ip in config_object['allowed_ips']['whitelisted']:
+                normalised_whitelisted.append( DBConfigHandler.expand_ipv6_with_wildcard( ip.strip().lower() ) )
+            config_object['allowed_ips']['whitelisted'] = normalised_whitelisted
+            
+            normalise_blacklisted = []
+            for ip in config_object['allowed_ips']['blacklisted']:
+                normalise_blacklisted.append( DBConfigHandler.expand_ipv6_with_wildcard( ip.strip().lower() ) )
+            config_object['allowed_ips']['blacklisted'] = normalise_blacklisted
+            
             for ip in (config_object['allowed_ips']['whitelisted'] + config_object['allowed_ips']['blacklisted']):
                 if not DBConfigHandler.is_valid_ipv4_or_ipv6_wildcard_range( ip ):
                     return False

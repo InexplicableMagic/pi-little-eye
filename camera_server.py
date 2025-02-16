@@ -49,7 +49,7 @@ def is_authenticated( ):
                 if not dbch.is_app_in_unathenticated_state():
                         authenticated, username = dbch.validate_token_auth( session_id, auth_token )
                         if authenticated:
-                            return (True, "Authenticated", 200, username)
+                            return (True, "Authenticated", 200, username.lower() )
                         else:
                             return (False, "Authentication failure", 401, None)
                 else:
@@ -94,7 +94,6 @@ def video_feed():
 @app.route('/api/v1/test_auth_state', methods=['POST'])
 @nocache
 def auth_state():
-    #TODO: Verify IP Allowed
     response = make_response( jsonify(  { 'error': True, 'message': 'unknown error' } ), 500 )
     
     if dbch.is_ip_list_allowed( get_list_of_possible_client_ips() ):
@@ -126,20 +125,39 @@ def auth_state():
 
     return response
 
-@app.route('/api/v1/logout' )
+# Logout the current user, or an admin can logout a different user
+@app.route('/api/v1/logout', methods=['POST'] )
 @nocache
 def logout():
     response = make_response( jsonify(  { 'error': True, 'message': 'unknown error' } ), 500 )
-    (authenticated, message, http_code, username) = is_authenticated( )
+    
+    (authenticated, message, http_code, this_user_username) = is_authenticated( )
     if not authenticated:
         return make_response( jsonify ( { 'error': True, 'message': message } ), http_code )
     else:
-        dbch.remove_all_user_sessions( username )
-        ch.logout_user( username )
-        response = make_response( jsonify (  { 'error': False, 'message': 'logged out' } ), 200 )
-        response.delete_cookie('session_id')
-        response.delete_cookie('auth_token')
-        return response
+        logout_this_user = True    
+        post_data = request.get_json(silent=True)
+        if post_data:
+            user_to_logout = post_data.get('username', None)
+            if user_to_logout is not None:
+                user_to_logout = user_to_logout.lower()
+                if user_to_logout != this_user_username:
+                    current_user_permissions = dbch.get_user_permissions( username_authenticated )
+                    if current_user_permissions == 'admin':
+                        dbch.remove_all_user_sessions( user_to_logout )
+                        ch.logout_user( user_to_logout )
+                        logout_this_user = False
+                        response = make_response( jsonify(  { 'error': False, 'message': 'User logged out' } ), 200 )
+                    else:
+                        response = make_response( jsonify(  { 'error': True, 'message': 'Not authorised to logout other users' } ), 401 )
+                        
+        if logout_this_user:
+            dbch.remove_all_user_sessions( this_user_username )
+            ch.logout_user( this_user_username )
+            response = make_response( jsonify (  { 'error': False, 'message': 'logged out' } ), 200 )
+            response.delete_cookie('session_id')
+            response.delete_cookie('auth_token')
+            return response
         
     return response 
 
@@ -332,10 +350,10 @@ def index():
 
 if __name__ == '__main__':
     
-    ch = CameraHandler()
-    print(ch.enumerate_resolutions(0))
-    
+    ch = CameraHandler()    
     dbch = DBConfigHandler("security_cam_state.sqlite")
     serve(app, host='0.0.0.0', port=5000)
+    
+
     
 

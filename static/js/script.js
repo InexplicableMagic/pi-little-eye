@@ -6,6 +6,7 @@ const videoURL = '/api/v1/video_feed';
 const testAuthStateURL = '/api/v1/test_auth_state';
 const getConfigURL = '/api/v1/get_config';
 const setConfigURL = '/api/v1/set_config';
+const logoutURL = '/api/v1/logout';
 
 //TODO: Check cookies are enabled and message the user if not
 function verifyCookiesEnabled() {
@@ -59,6 +60,26 @@ function setPass(username, password, challenge, orignalPassword = null) {
     return response.json();
   });
 
+}
+
+function logout( whichUser = null ){
+    data = {}
+    if(whichUser != null ){
+        data = { 'username': whichUser }
+    }
+    return fetch( logoutURL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(data)
+  }).then(response => {
+    if (!response.ok) {
+      console.log(response)
+      throw new Error('Network error returned from logout');
+    }
+    return response.json();
+  });
 }
 
 function getChallenge(){
@@ -118,9 +139,9 @@ function resetConfigOnUI(){
 
 function isValidIPWithWildcard(ip) {
   const ipv4Regex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$|^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){0,3}\*$/
-  const ipv6Regex = /^(?:(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,7}\*)$/;
+  const ipv6Regex = /^(?:(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|(?:(?:[a-fA-F\d]{1,4})\:){0,7}(?:\*|(?:[a-fA-F\d]{1,3})\*))$/;
 
-  return ipv4Regex.test(ip) || ipv6Regex.test(ip);
+  return (ipv4Regex.test(ip) || ipv6Regex.test(ip)) && ( ip != '*' );
 }
 
 function validateIPArray(ipArray) {
@@ -340,6 +361,7 @@ function generateUserList(data, divId) {
   const columns = [
     { key: 'username', label: 'User' },
     { key: 'permissions', label: 'Group' },
+    { key: 'disabled', label: 'Disabled' },
     { key: 'active_sessions', label: 'Logged In' }
   ];
 
