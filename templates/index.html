@@ -6,11 +6,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script src="{{ url_for('static', filename='js/script.js')}}"></script> 
     <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/main.css')}}">
-    <title>Live Video Stream with Timestamp</title>
+    <title>Security Camera</title>
 </head>
 <body>
     <div id="video-container">
-    <h1>Live Video Stream with Timestamp</h1>
+        <button onclick="logout();" id="logout-button">Logout</button>
     </div>
     <div id="set-initial-admim-password">
     	  <p>Set Admin Username and Password</p>
@@ -39,7 +39,11 @@
             <label for="allowed-ip-list">List of allowed IP ranges:</label>
             <button onclick="saveConfig();" id="config-save-changes-button">Save Changes</button>
             <div id="user-list-table">
-            
+            </div>
+            <div id="add-new-user">
+                <input id="new-username" placeholder="new username">
+                <input type="password" id="new-user-password" placeholder="initial password">
+                <button id="add-new-user" onclick="addNewUser()" >Add User</button>    
             </div>
         </div>
         <div id="standard-config">

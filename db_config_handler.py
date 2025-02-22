@@ -398,27 +398,39 @@ class DBConfigHandler:
                conn.close() 
             
     def expire_challenge_response(self):
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute('DELETE FROM challenge_response WHERE expiry < CURRENT_TIMESTAMP')
-        conn.commit()
-        conn.close()
+        conn = None
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM challenge_response WHERE expiry < CURRENT_TIMESTAMP')
+            conn.commit()
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            return None   
+        finally:
+            if conn:
+                conn.close()
     
     # Adds a token we require the authenticating user to send back to us      
     def generate_challenge_response(self):
-    
+        conn = None
         self.expire_challenge_response( )
-        
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        response_uuid = str(uuid.uuid4())
-        expiry_timestamp = datetime.now() + timedelta(minutes=5)
-        cursor.execute('INSERT INTO challenge_response (response, expiry) VALUES ( ?, ? )', 
-                        (response_uuid, expiry_timestamp))
-        # Commit the transaction and close the connection
-        conn.commit()
-        conn.close()
-        return response_uuid;
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            response_uuid = str(uuid.uuid4())
+            expiry_timestamp = datetime.now() + timedelta(minutes=5)
+            cursor.execute('INSERT INTO challenge_response (response, expiry) VALUES ( ?, ? )', 
+                            (response_uuid, expiry_timestamp))
+            # Commit the transaction and close the connection
+            conn.commit()
+            return response_uuid;
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            return None   
+        finally:
+            if conn:
+                conn.close()
         
     def test_user_exists( self, username ):
         if DBConfigHandler.validate_utf8_string( username, max_length=DBConfigHandler.MAX_USERNAME_LENGTH ):
@@ -450,9 +462,73 @@ class DBConfigHandler:
             query_exists = "SELECT pass_bcrypt, salt FROM authentication WHERE username = ? AND disabled = FALSE"
             cursor.execute(query_exists, (username,))
             result = cursor.fetchone()
+            conn.commit()
             return result            
         except Exception as e:
             print(f"An error occurred: {e}")
+            return None   
+        finally:
+            if conn:
+                conn.close()
+    
+    def is_account_locked( self, username ):
+        conn = None
+        try:
+            if not DBConfigHandler.validate_utf8_string( username, max_length=DBConfigHandler.MAX_USERNAME_LENGTH ):
+                raise ValueError( "Username is invalid" )
+            
+            if not self.test_user_exists( username ):
+                raise ValueError( "Username does not exist" )
+            
+            max_bad_pass_attempts = int( self.get_parameter_value( 'disable_account_after_bad_pass_attempts' ) )
+                
+            username = username.lower()
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute("UPDATE authentication SET disabled=TRUE WHERE bad_pass_attempts >= ? AND permissions != 'admin'", (max_bad_pass_attempts,))
+            query_disabled = "SELECT disabled FROM authentication WHERE username = ?"
+            cursor.execute(query_disabled, (username,))
+            result = cursor.fetchone()
+            conn.commit()
+            if result is not None:
+                return result[0] == True
+            else:
+                return False  # Return False if the username doesn't exist           
+        except Exception as e:
+            print(f"An error occurred (is_account_locked): {e}")
+            return None   
+        finally:
+            if conn:
+                conn.close()
+    
+    
+    def lock_unlock_delete_account( self, username, action):
+        conn = None
+        try:
+            if not DBConfigHandler.validate_utf8_string( username, max_length=DBConfigHandler.MAX_USERNAME_LENGTH ):
+                    raise ValueError( "Username is invalid" )
+
+            username = username.lower()
+            if not self.test_user_exists( username ):
+                raise ValueError( "Username does not exist" )        
+            
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            if action=='lock':
+                cursor.execute("UPDATE authentication SET disabled=TRUE WHERE username=?", (username,))
+            elif action=='unlock':
+                cursor.execute("UPDATE authentication SET disabled=FALSE,bad_pass_attempts=0 WHERE username=?", (username,))
+            elif action=='delete':
+                cursor.execute("DELETE FROM authentication WHERE username=?", (username,))
+            else:
+                raise ValueError( "Incorrect action. Must be lock, unlock or delete." )  
+            conn.commit()
+            conn.close()
+            conn = None
+            if action=='lock' or action=='delete':
+                self.remove_all_user_sessions( username )
+        except Exception as e:
+            print(f"An error occurred (lock_unlock_delete_account): {e}")
             return None   
         finally:
             if conn:
@@ -673,8 +749,8 @@ class DBConfigHandler:
                 raise ValueError( "Username is invalid" )
             
             username = username.lower()
-            if not self.test_user_exists( username ):
-                raise ValueError( "Username does not exist" )
+            
+            # Don't test if user exists because this method is used to remove hanging sessions for deleted users
                 
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -783,15 +859,23 @@ class DBConfigHandler:
                 conn.close()
         
         return ip_response
-    
-    def get_all_config( self ):      
+
+    def get_all_config( self, permissions ):      
         list_of_allowed_ips = self.get_ip_allow_list(  )
-        return { 
-                    'error': False, 
-                    'allowed_ips': list_of_allowed_ips,
-                    'enforce_ip_whitelist': self.get_parameter_value('enforce_ip_whitelist'),
-                    'usernames' : self.list_all_usernames()
-               }
+        
+        config_data = {  }
+        
+        if permissions == 'admin':
+            config_data = { 
+                        'error': False, 
+                        'allowed_ips': list_of_allowed_ips,
+                        'enforce_ip_whitelist': self.get_parameter_value('enforce_ip_whitelist'),
+                        'usernames' : self.list_all_usernames()
+                   }
+            
+        return config_data
+       
+       
     
     def validate_config_object( config_object ):
         if config_object:
@@ -854,13 +938,19 @@ class DBConfigHandler:
             cursor.execute(query_exists, (session_id,))
             retrieved_token_sha512 = cursor.fetchone()
             test_token_sha512 = DBConfigHandler.sha512_hash( token_to_test )
+            conn.close()
+            conn = None
                         
             if retrieved_token_sha512:
                 if len( retrieved_token_sha512 ) == 2:
                     if retrieved_token_sha512[0] == test_token_sha512:
                         username = retrieved_token_sha512[1].lower()
                         if self.test_user_exists( username ):
-                            return (True, username)
+                            if not self.is_account_locked( username ):
+                                return (True, username)
+                            else:
+                                self.remove_all_user_sessions( username )
+                                return (False, None)    
                         else:
                             # User was deleted or something went wrong but still has a valid hanging login session
                             # If user doesn't exist then delete any remaining login sessions

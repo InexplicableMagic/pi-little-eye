@@ -7,6 +7,9 @@ const testAuthStateURL = '/api/v1/test_auth_state';
 const getConfigURL = '/api/v1/get_config';
 const setConfigURL = '/api/v1/set_config';
 const logoutURL = '/api/v1/logout';
+const lockUnlockDeleteURL = '/api/v1/lock_delete_account';
+
+const userTableID = 'user-table'
 
 //TODO: Check cookies are enabled and message the user if not
 function verifyCookiesEnabled() {
@@ -28,6 +31,50 @@ function checkPasswords( pass1ID, pass2ID, messageID, buttonID ) {
         setPasswordButton.disabled = true;
     }
 }
+
+function addNewUser(){
+    const new_user_name = document.getElementById('new-username');
+    const new_user_pass = document.getElementById('new-user-password');
+    getChallenge()
+    .then(challenge => {    
+        return setPass(new_user_name.value, new_user_pass.value, challenge);
+    }).then(result => {
+        if( result && result.error == false ){
+            console.log("New user added.")
+        }else{
+            console.log("Error on adding user:"+result.message)
+        }
+    })
+  .catch(error => {
+    console.error('Error:', error);
+  });
+}
+
+function lockUnlockDelete(username, action) {
+  
+  const data = {
+    username: username,
+    csrf_token: csrfToken,
+    action: action
+  };
+  
+  return fetch(lockUnlockDeleteURL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(data)
+  })
+  .then(response => {
+    if (!response.ok) {
+      console.log(response)
+      throw new Error('Network error returned from lockUnlockDelete');
+    }
+    return response.json();
+  });
+
+}
+
 
 function setPass(username, password, challenge, orignalPassword = null) {
   
@@ -130,7 +177,7 @@ function resetConfigOnUI(){
             }else{
                 document.getElementById('any-ip-radio').checked = true;
             }
-            generateUserList( config.usernames, 'user-list-table' )
+            generateUserList( config.usernames, config.current_username, 'user-list-table' )
         }else{
             console.log("No config allowed")
         }
@@ -348,7 +395,7 @@ function login( username, password ){
 }
 
 //Convert the configuration list of users into an HTML table
-function generateUserList(data, divId) {
+function generateUserList(data, current_username, divId) {
 
   // Get the target div
   const targetDiv = document.getElementById(divId);
@@ -357,20 +404,18 @@ function generateUserList(data, divId) {
     return;
   }
 
-  // Define column order and labels
   const columns = [
     { key: 'username', label: 'User' },
     { key: 'permissions', label: 'Group' },
-    { key: 'disabled', label: 'Disabled' },
+    { key: 'disabled', label: 'Locked' },
     { key: 'active_sessions', label: 'Logged In' }
   ];
 
-  // Create the table
   const table = document.createElement('table');
+  table.id=userTableID
   table.style.border = '1px solid black';
   table.style.borderCollapse = 'collapse';
 
-  // Create table header
   const thead = table.createTHead();
   const headerRow = thead.insertRow();
   columns.forEach(column => {
@@ -381,16 +426,55 @@ function generateUserList(data, divId) {
     headerRow.appendChild(th);
   });
 
-  // Create table body
   const tbody = table.createTBody();
-  data.forEach(user => {
+  data.forEach(user_data => {
     const row = tbody.insertRow();
     columns.forEach(column => {
       const cell = row.insertCell();
-      cell.textContent = user[column.key];
+      cell.textContent = user_data[column.key];
       cell.style.border = '1px solid black';
       cell.style.padding = '5px';
-    });
+      
+      if( user_data.username != current_username ){
+          if(column.key == 'active_sessions' && user_data[column.key] == 'yes'){
+            const button = document.createElement('button');
+            button.textContent = 'logout';
+            button.style.marginLeft = '5px';
+            button.addEventListener('click', () => {
+                logout( whichUser=user_data.username ).then ( () => {
+                    console.log("logged out");
+                    resetConfigOnUI()
+                });
+            });
+            cell.appendChild(button);
+           }
+
+          if(column.key == 'disabled' ){
+            const button = document.createElement('button');
+            button.style.marginLeft = '5px';
+            
+                if( user_data[column.key] == 'yes' ){
+                    button.textContent = 'unlock';
+                    button.addEventListener('click', () => {
+                        lockUnlockDelete( user_data.username, 'unlock' ).then ( () => {
+                            console.log("unlocked");
+                            resetConfigOnUI();
+                        });
+                    });
+                }else{
+                    button.textContent = 'lock';
+                    button.addEventListener('click', () => {
+                       lockUnlockDelete( user_data.username, 'lock' ).then ( () => {
+                            console.log("locked");
+                            resetConfigOnUI();
+                        });
+                    });
+                }
+                cell.appendChild(button);
+           }
+       }
+    
+  });
   });
 
   // Clear the target div and append the table

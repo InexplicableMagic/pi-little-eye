@@ -57,7 +57,7 @@ def is_authenticated( ):
             else:
                 return (False, "No auth cookie sent", 400, None)
         else:
-            return (False, "IP disallowed", 401, None)
+            return (False, "IP disallowed", 403, None)
             
         return(False, "Unknown error", 500, None)
 
@@ -142,14 +142,14 @@ def logout():
             if user_to_logout is not None:
                 user_to_logout = user_to_logout.lower()
                 if user_to_logout != this_user_username:
-                    current_user_permissions = dbch.get_user_permissions( username_authenticated )
+                    current_user_permissions = dbch.get_user_permissions( this_user_username )
                     if current_user_permissions == 'admin':
                         dbch.remove_all_user_sessions( user_to_logout )
                         ch.logout_user( user_to_logout )
                         logout_this_user = False
                         response = make_response( jsonify(  { 'error': False, 'message': 'User logged out' } ), 200 )
                     else:
-                        response = make_response( jsonify(  { 'error': True, 'message': 'Not authorised to logout other users' } ), 401 )
+                        response = make_response( jsonify(  { 'error': True, 'message': 'Not authorised to logout other users' } ), 403 )
                         
         if logout_this_user:
             dbch.remove_all_user_sessions( this_user_username )
@@ -169,10 +169,12 @@ def get_config():
     if not authenticated:
         return make_response( jsonify ( { 'error': True, 'message': message } ), http_code )
     else:
-        config = dbch.get_all_config()
+        current_user_permissions = dbch.get_user_permissions( username )
+        config = dbch.get_all_config( current_user_permissions )
+        config['current_username'] = username
         return make_response( jsonify ( config ), 200 )
         
-    return response 
+    return response
     
 @app.route('/api/v1/set_config', methods=['POST'] )
 @nocache
@@ -198,6 +200,57 @@ def set_config():
     
     return response
     
+# Lock/unlock or delete a user account
+@app.route('/api/v1/lock_delete_account', methods=['POST'] )
+@nocache
+def lock_delete_account():
+    response = make_response( jsonify(  { 'error': True, 'message': 'unknown error' } ), 500 )
+    (authenticated, message, http_code, username_authenticated) = is_authenticated( )
+    
+    if not authenticated:
+        return make_response( jsonify ( { 'error': True, 'message': message } ), http_code )
+    else:
+        post_data = request.get_json(silent=True)
+        if post_data:
+            csrf_in_post = post_data.get('csrf_token', None)
+            csrf_in_cookie = request.cookies.get('csrf_token')
+            if DBConfigHandler.is_uuid_valid( csrf_in_cookie ) and DBConfigHandler.is_uuid_valid( csrf_in_post ) and csrf_in_cookie == csrf_in_post:
+                if dbch.test_user_exists( username_authenticated ): 
+                    current_user_permissions = dbch.get_user_permissions( username_authenticated )
+                    if current_user_permissions is not None and current_user_permissions == 'admin':
+                        username_postdata = post_data.get('username', None)
+                        action = post_data.get('action', None)
+                        if username_postdata and action:                  
+                            if dbch.test_user_exists( username_postdata ):
+                                if username_authenticated.lower() != username_postdata.lower():
+                                    if action == 'lock':
+                                        dbch.lock_unlock_delete_account( username_postdata, 'lock' )
+                                        dbch.remove_all_user_sessions( username_postdata )
+                                        ch.logout_user( username_postdata )
+                                        response = make_response( jsonify ( { 'error': False, 'message': 'Account locked' } ), 200 )
+                                    elif action == 'unlock':
+                                        dbch.lock_unlock_delete_account( username_postdata, 'unlock' )
+                                        response = make_response( jsonify ( { 'error': False, 'message': 'Account unlocked' } ), 200 )
+                                    elif action == 'delete':
+                                        dbch.lock_unlock_delete_account( username_postdata, 'delete' )
+                                        dbch.remove_all_user_sessions( username_postdata )
+                                        ch.logout_user( username_postdata )
+                                        response = make_response( jsonify ( { 'error': False, 'message': 'Account deleted' } ), 200 )
+                                    else:
+                                        response = make_response( jsonify ( { 'error': True, 'message': 'Incorrect action. Must be unlock,lock or delete', 'err_type': 'bad_action' } ), 400 )        
+                                else:
+                                    response = make_response( jsonify ( { 'error': True, 'message': 'Cant lock/unlock or delete own account.', 'err_type': 'username_missing' } ), 403 )
+                            else:
+                                response = make_response( jsonify ( { 'error': True, 'message': 'username doesnt exist', 'err_type': 'user_not_exists' } ), 400 )
+                        else:
+                            response = make_response( jsonify ( { 'error': True, 'message': 'Username missing in post data', 'err_type': 'username_missing' } ), 400 )
+                    else:
+                        response = make_response( jsonify ( { 'error': True, 'message': 'Only admin account can perform this operation', 'err_type': 'needs_admin' } ), 403 )
+            else:
+                response = make_response( jsonify ( { 'error': True, 'message': 'CSRF parameter or cookie problem', 'err_type': 'csrf_problem' } ), 400 ) 
+    
+    return response
+    
 @app.route('/api/v1/get_challenge')
 @nocache
 def get_challenge():
@@ -205,7 +258,7 @@ def get_challenge():
     if dbch.is_ip_list_allowed( get_list_of_possible_client_ips() ):
         return make_response( jsonify( { 'error': False, 'message':'', 'challenge' : dbch.generate_challenge_response( ) } ), 200 )
     else:
-        return make_response( jsonify( { 'error': True, 'message':'IP disallowed' } ), 401)
+        return make_response( jsonify( { 'error': True, 'message':'IP disallowed' } ), 403)
 
 @app.route('/api/v1/login', methods=['POST'] )
 @nocache
@@ -243,7 +296,7 @@ def login():
             else:
                 response = make_response( jsonify ( { 'error': True, 'message': 'username,password or challenge parameters must be set in POST request.' } ), 400 )
     else:
-        response = make_response( jsonify( { 'error': True, 'message': 'IP disallowed' } ), 401 )
+        response = make_response( jsonify( { 'error': True, 'message': 'IP disallowed' } ), 403 )
     
     return response
 
@@ -312,7 +365,7 @@ def set_pass():
                                                 else:
                                                     response = make_response( jsonify( { 'error': True, 'message': 'Error, cant set own user pass','err_type': 'no_set_own_user' } ), 400 )
                                             else:
-                                                response = make_response( jsonify ( { 'error': True, 'message': 'Not authorized to set password for a different user', 'err_type': 'bad_group' } ), 401 )                    
+                                                response = make_response( jsonify ( { 'error': True, 'message': 'Not authorized to set password for a different user', 'err_type': 'bad_group' } ), 403 )                    
                             
                     else:
                         response = make_response( jsonify ( { 'error': True, 'message': 'Bad challenge received.', 'err_type': 'bad_challenge' } ), 400 )
@@ -323,7 +376,7 @@ def set_pass():
         else:
             response = make_response( jsonify ( { 'error': True, 'message': 'JSON parse error', 'err_type': 'json_parse' } ), 400 )
     else:
-        response = make_response( jsonify( { 'error': True, 'message': 'IP disallowed', 'err_type': 'ip_block' } ), 401 )
+        response = make_response( jsonify( { 'error': True, 'message': 'IP disallowed', 'err_type': 'ip_block' } ), 403 )
     
     return response
 

@@ -112,10 +112,10 @@ class CameraHandler:
         with self.update_login_lock:
             if username in self.logged_in_users:
                 self.logged_in_users[username]+=1
-                print( "viewing:"+str(self.logged_in_users[username]) )
+                #print( "viewing:"+str(self.logged_in_users[username]) )
             else:
                 self.logged_in_users[username] = 1
-                print( "viewing:"+str(self.logged_in_users[username]) )
+                #print( "viewing:"+str(self.logged_in_users[username]) )
 
     def is_user_viewing( self, username ):
         with self.update_login_lock:
