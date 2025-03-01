@@ -12,10 +12,12 @@ import os
 
 class CameraHandler:
 
-    def __init__(self):
+    def __init__(self, config ):
+        self.config = config
         self.camera_running = False
         #Currently supports the first found camera
-        self.selected_camera_number = 0
+        self.selected_camera_number = config.get_parameter_value( 'cam_number' )
+        self.user_selected_res = ( config.get_parameter_value( 'cam_res_width' ), config.get_parameter_value( 'cam_res_height' ) )
         self.camera_state_change_lock = threading.Lock()
         self.frame_publish_lock = threading.Lock()
         self.last_frame = None
@@ -25,7 +27,13 @@ class CameraHandler:
         Picamera2.set_logging(Picamera2.ERROR)
         os.environ["LIBCAMERA_LOG_LEVELS"] = "ERROR"
         #Enquire about the resolutions the attached camera can do
-        self.available_resolutions = self.__enumerate_resolutions( self.selected_camera_number )
+        self.camera_deteted = False
+        self.available_resolutions = []
+        resolutions = self.__enumerate_resolutions( self.selected_camera_number )
+        if resolutions != None and len(resolutions) > 0:
+            self.available_resolutions = resolutions
+            self.current_resolution = CameraHandler.__suggest_camera_resolution( resolutions, self.user_selected_res )
+            self.camera_deteted = True
 
     def publish_image(self):
         with self.frame_publish_lock:
@@ -43,15 +51,17 @@ class CameraHandler:
             time.sleep(0.03)
         
     def start_camera(self):
-        with self.camera_state_change_lock:
-            if not self.camera_running:
-                self.picam2 = Picamera2(self.selected_camera_number)
-                self.picam2.configure(self.picam2.create_preview_configuration(main={"format": 'XRGB8888', "size": (640, 480)}))
-                self.picam2.start()
-                self.camera_running = True
-                time.sleep(0.1)
-                self.capture_thread = threading.Thread(target=self.publish_image)
-                self.capture_thread.start()
+        if self.camera_deteted:
+            with self.camera_state_change_lock:
+                if not self.camera_running:
+                    self.picam2 = Picamera2(self.selected_camera_number)
+                    self.picam2.configure(self.picam2.create_preview_configuration(main={"format": 'XRGB8888', "size": self.current_resolution}))
+                    self.picam2.start()
+                    self.camera_running = True
+                    time.sleep(0.1)
+                    self.capture_thread = threading.Thread(target=self.publish_image)
+                    self.capture_thread.start()
+                    self.config.write_log_line( 'info', False , '', '', 'camera_started', f"Camera switched on." )
                 
             
     def stop_camera(self):
@@ -65,27 +75,77 @@ class CameraHandler:
 
                 self.picam2.stop()
                 self.picam2.close()
+                self.config.write_log_line( 'info', False , '', '', 'camera_stopped', f"Camera switched off." )
+
+    # Change the camera resolution - can be set whilst the camera is running
+    def change_resolution(self, new_resolution):
+        #Validate the user input
+        if new_resolution is not None and isinstance(new_resolution, (list, tuple)):
+            if len( new_resolution ) == 2 and isinstance( new_resolution[0], int) and isinstance( new_resolution[1], int):
+                if new_resolution[0] > 128 and new_resolution[1] > 128:
+                    #Don't change resolution if it's the same as the current resolutions
+                    #Validates the resolution passed in is a mode available on this camera
+                    if self.camera_deteted:
+                        new_resolution = CameraHandler.__suggest_camera_resolution( self.available_resolutions, new_resolution )
+                        if new_resolution[0] != self.current_resolution[0] or new_resolution[1] != self.current_resolution[1]:
+                            # Set the camera resolution
+                            with self.camera_state_change_lock:
+                                with self.frame_publish_lock:
+                                    if self.camera_running:
+                                        new_config = self.picam2.create_still_configuration(main={"format": 'XRGB8888', "size": new_resolution})
+                                        self.picam2.switch_mode(new_config)
+                            
+                            # Update the config with the selected resolution
+                            self.current_resolution = new_resolution
+                            self.config.insert_or_update_parameter( 'cam_res_width', 'int', new_resolution[0] )
+                            self.config.insert_or_update_parameter( 'cam_res_height', 'int', new_resolution[1] )
+
+    def is_camera_detected(self):
+        return self.camera_deteted
     
     # Return the cached version of the available camera resolutions
-    def get_camera_resolutions():
+    def get_camera_resolutions( self ):
         return self.available_resolutions
+        
+    def get_camera_current_resolutions( self ):
+        return self.current_resolution
     
-    # Get the resolutions the camera can do             
+    #Converts the user selected resolution into the nearest actual resolution the camera can do
+    def __suggest_camera_resolution( resolution_list, user_res_choice ):
+        
+        for resolution in resolution_list:
+            if resolution[0] >= user_res_choice[0] and resolution[1] >= user_res_choice[1]:
+                return resolution
+        
+        # If we can't find anything suitable, return the first resolution on the list
+        return resolutions[0]
+        
+    def set_config( self, post_data ):
+        if post_data is not None and isinstance( post_data, dict):
+            if 'selected_resolution' in post_data:
+                if isinstance( post_data[ 'selected_resolution' ], (list,tuple) ):
+                    self.change_resolution( post_data[ 'selected_resolution' ] )
+    
+    # Get the resolutions the camera can do  
+    # Should be called once on boot           
     def __enumerate_resolutions( self, camera_number ):
         resolutions = []
         
-        with self.camera_state_change_lock:
-            if self.camera_running:
-                pc2 = self.picam2
-            else:
-                pc2 = Picamera2(camera_number)
-            sensor_modes = pc2.sensor_modes
-            for camfmt in sensor_modes:
-                if 'size' in camfmt:
-                    resolutions.append( camfmt['size'] )
-        
-            if not self.camera_running:
-                pc2.close()
+        try:
+            with self.camera_state_change_lock:
+                if self.camera_running:
+                    pc2 = self.picam2
+                else:
+                    pc2 = Picamera2(camera_number)
+                sensor_modes = pc2.sensor_modes
+                for camfmt in sensor_modes:
+                    if 'size' in camfmt:
+                        resolutions.append( camfmt['size'] )
+            
+                if not self.camera_running:
+                    pc2.close()
+        except:
+            return None
         
         return resolutions
 
@@ -174,6 +234,7 @@ class CameraHandler:
                     self.logged_in_users[username]-=1
                     if self.logged_in_users[username] < 1:
                         del self.logged_in_users[username]
+                        self.config.write_log_line( 'info', False , username, '', 'disconnect', f"User {username} disconnected from camera." )
             
             if self.get_total_num_viewing_sessions() < 1:
                 self.stop_camera()

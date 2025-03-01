@@ -39,7 +39,6 @@ def get_list_of_possible_client_ips():
                 possible_client_ips.append( untrusted_header_ip.lower().strip() )
     return possible_client_ips
 
-
 def is_authenticated( ):
         if dbch.is_ip_list_allowed( get_list_of_possible_client_ips() ):
             session_id = request.cookies.get('session_id', None)
@@ -60,6 +59,11 @@ def is_authenticated( ):
             return (False, "IP disallowed", 403, None)
             
         return(False, "Unknown error", 500, None)
+
+def log_entry( level, log_type, message, alert = False, ip_route=None, username=None ):
+    ip_route = ','.join( get_list_of_possible_client_ips() )
+    dbch.write_log_line( level, alert, username, ip_route, log_type, message )
+    
 
 @app.route('/api/v1/video_feed', methods=['GET'])
 @nocache
@@ -82,7 +86,11 @@ def video_feed():
             return Response(CameraHandler.create_message_image(message),mimetype='image/png')
         else:
             try:
+                if not ch.is_camera_detected():
+                    return Response(CameraHandler.create_message_image("No camera detected"),mimetype='image/png')
+
                 # If authentication was successful, return the video feed
+                log_entry( 'info', 'video_viewed', f"Camera viewed by user: {username}", username=username )
                 return Response(ch.generate_camera_video(username), mimetype='multipart/x-mixed-replace; boundary=frame')
             except RuntimeError as e:
                 return Response(CameraHandler.create_message_image("Camera Failure (see logs)"),mimetype='image/png')
@@ -172,6 +180,9 @@ def get_config():
         current_user_permissions = dbch.get_user_permissions( username )
         config = dbch.get_all_config( current_user_permissions )
         config['current_username'] = username
+        config['available_camera_resolutions'] = ch.get_camera_resolutions()
+        config['current_camera_resolution'] = ch.get_camera_current_resolutions()
+        config['is_camera_available'] = ch.is_camera_detected()
         return make_response( jsonify ( config ), 200 )
         
     return response
@@ -189,21 +200,28 @@ def set_config():
         if post_data:
             csrf_in_post = post_data.get('csrf_token', None)
             csrf_in_cookie = request.cookies.get('csrf_token')
-            if DBConfigHandler.is_uuid_valid( csrf_in_cookie ) and DBConfigHandler.is_uuid_valid( csrf_in_post ) and csrf_in_cookie == csrf_in_post: 
-                if DBConfigHandler.validate_config_object( post_data ):
-                    dbch.set_config( post_data )
-                    return make_response( jsonify ( { 'error': False, 'message': 'Config set' } ), 200 )
+            if DBConfigHandler.is_uuid_valid( csrf_in_cookie ) and DBConfigHandler.is_uuid_valid( csrf_in_post ) and csrf_in_cookie == csrf_in_post:
+                current_user_permissions = dbch.get_user_permissions( username )
+                if current_user_permissions is not None and current_user_permissions == 'admin':
+                    if DBConfigHandler.validate_config_object( post_data ):
+                        # Set options to be stored in the config
+                        dbch.set_config( post_data )
+                        # Set options that change the camera state
+                        ch.set_config( post_data )
+                        response = make_response( jsonify ( { 'error': False, 'message': 'Config set' } ), 200 )
+                    else:
+                        response = make_response( jsonify ( { 'error': True, 'message': 'Config validation error' } ), 400 )
                 else:
-                    return make_response( jsonify ( { 'error': True, 'message': 'Config validation error' } ), 400 )
+                    response = make_response( jsonify ( { 'error': True, 'message': 'Only admin user can set the config' } ), 403 )
             else:
                 response = make_response( jsonify ( { 'error': True, 'message': 'CSRF problem', 'err_type': 'csrf_problem' } ), 400 )
     
     return response
     
 # Lock/unlock or delete a user account
-@app.route('/api/v1/lock_delete_account', methods=['POST'] )
+@app.route('/api/v1/account_management', methods=['POST'] )
 @nocache
-def lock_delete_account():
+def account_management():
     response = make_response( jsonify(  { 'error': True, 'message': 'unknown error' } ), 500 )
     (authenticated, message, http_code, username_authenticated) = is_authenticated( )
     
@@ -247,7 +265,8 @@ def lock_delete_account():
                     else:
                         response = make_response( jsonify ( { 'error': True, 'message': 'Only admin account can perform this operation', 'err_type': 'needs_admin' } ), 403 )
             else:
-                response = make_response( jsonify ( { 'error': True, 'message': 'CSRF parameter or cookie problem', 'err_type': 'csrf_problem' } ), 400 ) 
+                response = make_response( jsonify ( { 'error': True, 'message': 'CSRF parameter or cookie problem', 'err_type': 'csrf_problem' } ), 400 )
+                log_entry( 'warning', 'csrf', f"Cross-site script check failure in account management. Possible malicious link click.", alert=True )
     
     return response
     
@@ -258,7 +277,9 @@ def get_challenge():
     if dbch.is_ip_list_allowed( get_list_of_possible_client_ips() ):
         return make_response( jsonify( { 'error': False, 'message':'', 'challenge' : dbch.generate_challenge_response( ) } ), 200 )
     else:
+        log_entry( 'warning', 'ip_block', f"Attempt to retrieve challenge token from blocked IP", alert=True )
         return make_response( jsonify( { 'error': True, 'message':'IP disallowed' } ), 403)
+        
 
 @app.route('/api/v1/login', methods=['POST'] )
 @nocache
@@ -285,18 +306,22 @@ def login():
                                 
                                 response = make_response( jsonify ( { 'error': False, 'pass_OK': True, 'message': 'Login successful.' } ), 200 )
                                 dbch.set_auth_token( response, username )
+                                log_entry( 'info', 'login_success', f"User {username} logged in", username=username )
                             else:
                                 response = make_response( jsonify ( { 'error': True, 'pass_OK': False, 'message': 'Login failed with supplied username/pass.' } ), 401 )
+                                log_entry( 'warning', 'login_fail', f"Login credentials failure with username: {username}", alert=True, username=username )
                         else:
                             response = make_response( jsonify ( { 'error': True, 'message': 'Bad challenge received.' } ), 400 )
+                            log_entry( 'warning', 'bad_challenge', f"Bad login attempt: incorrect challenge token received", alert=True, username=username )
                     else:
-                        response = make_response( jsonify ( { 'error': True, 'message': 'Invalid password format.' } ), 400 )    
+                        response = make_response( jsonify ( { 'error': True, 'message': 'Invalid password format' } ), 400 )    
                 else:
-                    response = make_response( jsonify ( { 'error': True, 'message': 'Invalid username format.' } ), 400 )
+                    response = make_response( jsonify ( { 'error': True, 'message': 'Invalid username format' } ), 400 )
             else:
                 response = make_response( jsonify ( { 'error': True, 'message': 'username,password or challenge parameters must be set in POST request.' } ), 400 )
     else:
         response = make_response( jsonify( { 'error': True, 'message': 'IP disallowed' } ), 403 )
+        log_entry( 'warning', 'ip_block', f"Attempted login from blocked IP", alert=True )
     
     return response
 
@@ -332,6 +357,7 @@ def set_pass():
                             # An initial admin password has been set - so check the user is authenticated before allowing a password change
                             (authenticated, message, http_code, username_authenticated) = is_authenticated( )
                             if not authenticated:
+                                log_entry( 'warning', 'auth_failure', f"Authentication failure attempting to set password for user {username_postdata}", alert=True )
                                 return make_response( jsonify ( { 'error': True, 'message': message, 'err_type': 'auth_failure' } ), http_code )
                             else:
                                 # We have just tested the user can correctly authenticate with this username
@@ -342,8 +368,10 @@ def set_pass():
                                         if dbch.verify_password( username_authenticated, original_password ):
                                             dbch.change_pass( username_authenticated, new_password )
                                             response = make_response( jsonify( { 'error': False, 'message': 'Password changed.' } ), 200 )
+                                            log_entry( 'info', 'password_set', f"User {username_authenticated} changed password", username=username_authenticated )
                                         else:
                                             response = make_response( jsonify ( { 'error': True, 'message': 'Failed to verify original password', 'err_type': 'oiginal_pass_failure' } ), 401 )
+                                            log_entry( 'warning', 'password_failure', f"User {username_authenticated} tried to change password but entered incorrect original password", username=username_authenticated, alert=True )
                                     else:
                                         response = make_response( jsonify ( { 'error': True, 'message': 'Original password not set', 'err_type': 'pass_not_set' } ), 400 )
                                 else:
@@ -358,6 +386,7 @@ def set_pass():
                                                     if not dbch.test_user_exists( username_postdata ):
                                                         if dbch.set_pass( username_postdata, 'viewer', new_password ):
                                                             response = make_response( jsonify( { 'error': False, 'message': 'Password set.' } ), 200 )
+                                                            log_entry( 'info', 'password_set', f"Admin user {username_authenticated} set password for user {username_postdata}", username=username_authenticated )
                                                         else:
                                                             response = make_response( jsonify( { 'error': False, 'message': 'Failed to set password.' } ), 500 )
                                                     else:
@@ -369,19 +398,23 @@ def set_pass():
                             
                     else:
                         response = make_response( jsonify ( { 'error': True, 'message': 'Bad challenge received.', 'err_type': 'bad_challenge' } ), 400 )
+                        log_entry( 'warning', 'bad_challenge', f"Challenge token failure on trying to set password.", alert=True )
                 else:
                     response = make_response( jsonify ( { 'error': True, 'message': 'username,new-password and challenge parameters must be set in POST request.', 'err_type': 'bad_post' } ), 400 )
             else:
-                response = make_response( jsonify ( { 'error': True, 'message': 'CSRF parameter or cookie problem', 'err_type': 'csrf_problem' } ), 400 )    
+                response = make_response( jsonify ( { 'error': True, 'message': 'CSRF parameter or cookie problem', 'err_type': 'csrf_problem' } ), 400 )
+                log_entry( 'warning', 'csrf', f"Cross-site script check failure on trying to set password. Possible malicious link click.", alert=True )
         else:
             response = make_response( jsonify ( { 'error': True, 'message': 'JSON parse error', 'err_type': 'json_parse' } ), 400 )
     else:
         response = make_response( jsonify( { 'error': True, 'message': 'IP disallowed', 'err_type': 'ip_block' } ), 403 )
+        log_entry( 'warning', 'ip_block', f"Attempt to set password by blocked IP", alert=True )
     
     return response
 
 @app.route('/robots.txt')
 def static_from_root():
+    log_entry( 'warning', 'robots', 'robots.txt file was requested. This may indicate a web search engine has discovered this camera.', alert=True )
     return send_from_directory(app.static_folder, request.path[1:])
     
 
@@ -397,14 +430,15 @@ def index():
     # TODO: set Secure=True when HTTPS
     if 'csrf_token' not in request.cookies:
         response.set_cookie('csrf_token', csrf_token, httponly=True, secure=False, samesite='Strict')
-
+    log_entry( 'info', 'index_page', 'Camera front page accessed' )
     return response
 
 
 if __name__ == '__main__':
     
-    ch = CameraHandler()    
     dbch = DBConfigHandler("security_cam_state.sqlite")
+    ch = CameraHandler( dbch )
+    dbch.write_log_line( 'info', False, '','', 'software_started', 'Security camera software was started' )
     serve(app, host='0.0.0.0', port=5000)
     
 

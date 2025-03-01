@@ -7,7 +7,7 @@ const testAuthStateURL = '/api/v1/test_auth_state';
 const getConfigURL = '/api/v1/get_config';
 const setConfigURL = '/api/v1/set_config';
 const logoutURL = '/api/v1/logout';
-const lockUnlockDeleteURL = '/api/v1/lock_delete_account';
+const accountManagementURL = '/api/v1/account_management';
 
 const userTableID = 'user-table'
 
@@ -58,7 +58,7 @@ function lockUnlockDelete(username, action) {
     action: action
   };
   
-  return fetch(lockUnlockDeleteURL, {
+  return fetch(accountManagementURL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
@@ -178,6 +178,7 @@ function resetConfigOnUI(){
                 document.getElementById('any-ip-radio').checked = true;
             }
             generateUserList( config.usernames, config.current_username, 'user-list-table' )
+            populateSelectWithResolutions( 'camera-resolutions-select', config.available_camera_resolutions, config.current_camera_resolution )
         }else{
             console.log("No config allowed")
         }
@@ -229,7 +230,8 @@ function convertConfigUIStateToJSON(){
                 whitelisted: allowed_ip_listing_array,
                 blacklisted: []
                },
-               enforce_ip_whitelist: enforce_whitelisted_ips
+               enforce_ip_whitelist: enforce_whitelisted_ips,
+               selected_resolution: getSelectedResolution( 'camera-resolutions-select' )
         };
         return postObject;
         
@@ -394,7 +396,8 @@ function login( username, password ){
     });
 }
 
-//Convert the configuration list of users into an HTML table
+//Convert the list of camera users into an HTML table
+//for display in the configuration options
 function generateUserList(data, current_username, divId) {
 
   // Get the target div
@@ -436,9 +439,22 @@ function generateUserList(data, current_username, divId) {
       cell.style.padding = '5px';
       
       if( user_data.username != current_username ){
+          if(column.key == 'username' ){
+            const button = document.createElement('button');
+            button.textContent = 'Delete';
+            button.style.marginLeft = '5px';
+            button.addEventListener('click', () => {
+                lockUnlockDelete( user_data.username, 'delete' ).then ( () => {
+                            console.log("Deleted user");
+                            resetConfigOnUI();
+                });
+            });
+            cell.appendChild(button);
+          }
+          
           if(column.key == 'active_sessions' && user_data[column.key] == 'yes'){
             const button = document.createElement('button');
-            button.textContent = 'logout';
+            button.textContent = 'Logout';
             button.style.marginLeft = '5px';
             button.addEventListener('click', () => {
                 logout( whichUser=user_data.username ).then ( () => {
@@ -454,7 +470,7 @@ function generateUserList(data, current_username, divId) {
             button.style.marginLeft = '5px';
             
                 if( user_data[column.key] == 'yes' ){
-                    button.textContent = 'unlock';
+                    button.textContent = 'Unlock';
                     button.addEventListener('click', () => {
                         lockUnlockDelete( user_data.username, 'unlock' ).then ( () => {
                             console.log("unlocked");
@@ -462,7 +478,7 @@ function generateUserList(data, current_username, divId) {
                         });
                     });
                 }else{
-                    button.textContent = 'lock';
+                    button.textContent = 'Lock';
                     button.addEventListener('click', () => {
                        lockUnlockDelete( user_data.username, 'lock' ).then ( () => {
                             console.log("locked");
@@ -472,6 +488,7 @@ function generateUserList(data, current_username, divId) {
                 }
                 cell.appendChild(button);
            }
+           
        }
     
   });
@@ -480,6 +497,45 @@ function generateUserList(data, current_username, divId) {
   // Clear the target div and append the table
   targetDiv.innerHTML = '';
   targetDiv.appendChild(table);
+}
+
+function populateSelectWithResolutions(selectName, resolutions, currentResolution) {
+    // Access the select element by its ID
+    const selectElement = document.getElementById(selectName);
+
+    // Clear any existing options
+    selectElement.innerHTML = '';
+
+    // Iterate over the list of resolutions
+    resolutions.forEach(resolution => {
+        // Create an option element
+        const optionElement = document.createElement('option');
+
+        // Set the text and value of the option element
+        optionElement.textContent = `${resolution[0]} x ${resolution[1]}`;
+        optionElement.value = `${resolution[0]}x${resolution[1]}`;
+        
+        if (currentResolution && currentResolution[0] === resolution[0] && currentResolution[1] === resolution[1]) {
+            optionElement.selected = true;
+        }
+
+        // Append the option element to the select element
+        selectElement.appendChild(optionElement);
+    });
+}
+
+function getSelectedResolution(selectName) {
+    const selectElement = document.getElementById(selectName);
+    
+    const selectedOption = selectElement.options[selectElement.selectedIndex];
+    
+    if (!selectedOption) {
+        return null;
+    }
+    
+    const [width, height] = selectedOption.value.split('x').map(Number);
+    
+    return [width, height];
 }
 
 

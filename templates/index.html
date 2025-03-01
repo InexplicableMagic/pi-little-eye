@@ -32,9 +32,9 @@
         <div id="admin-only-config">
             <button onclick="saveConfig();" id="config-save-changes-button">Save Changes</button>
             <input type="radio" id="any-ip-radio" name="ips-allowed" value="any-ip" checked>
-            <label for="any-ip">Any IP can access camera</label><br/>
+            <label for="any-ip-radio">Any IP can access camera</label><br/>
             <input type="radio" id="allowed-ips-radio" name="ips-allowed" value="allowed-ips">
-            <label for="allowed-ips">Only below IP ranges can access camera</label><br/>
+            <label for="allowed-ips-radio">Only below IP ranges can access camera</label><br/>
             <textarea id="allowed-ip-list" name="allowed-ip-list" placeholder="192.168.*" rows="4" cols="25"></textarea>
             <label for="allowed-ip-list">List of allowed IP ranges:</label>
             <button onclick="saveConfig();" id="config-save-changes-button">Save Changes</button>
@@ -44,6 +44,9 @@
                 <input id="new-username" placeholder="new username">
                 <input type="password" id="new-user-password" placeholder="initial password">
                 <button id="add-new-user" onclick="addNewUser()" >Add User</button>    
+            </div>
+            <div>
+                <select id="camera-resolutions-select"></select>
             </div>
         </div>
         <div id="standard-config">

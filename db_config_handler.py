@@ -30,7 +30,9 @@ class DBConfigHandler:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
-        # Create the authentication table if it doesn't exist
+        # Authentication table - stores usernames and passwords of camera users
+        # disabled - whether the account is locked
+        # bad_pass_attempts - number of consecutive failed login attempts for this account
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS authentication (
                 username TEXT PRIMARY KEY NOT NULL UNIQUE,
@@ -43,6 +45,7 @@ class DBConfigHandler:
             )
         ''')
         
+        # Active sessions - list of sessions currently logged in and authorised by cookie
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS sessions (
                 session_id TEXT PRIMARY KEY NOT NULL UNIQUE,
@@ -52,7 +55,7 @@ class DBConfigHandler:
             )
         ''')
         
-        # Used to verify a user can receive data at their perported IP
+        # List of issued challege UUIDs. Used to verify a user can receive data at their perported IP
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS challenge_response (
                 response TEXT,
@@ -60,6 +63,7 @@ class DBConfigHandler:
             )
         ''')
         
+        # Configuration parameters as key/value pairs (with strong typing for the value)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS parameters (
                 key TEXT PRIMARY KEY NOT NULL UNIQUE,
@@ -68,11 +72,30 @@ class DBConfigHandler:
             )
         ''')
         
-        # If whitelisted is false, then blacklisted
+        # List of IPs that are permitted to view the camera or else are blacklisted
+        # If whitelisted is False, then the IP is blacklisted
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS ip_allow_list (
             ip TEXT NOT NULL,
             whitelisted BOOLEAN CHECK (whitelisted IN (0, 1))
+        );
+        ''')
+
+        # Level: warning, info or error
+        # Alert: true if the log line should be specifically highlighted to an admin on login, such as a security problem
+        # Username: that attempted the action or username presented on login
+        # IP route: comma separated list of IPs associated with the user attempting the action
+        # type: Type of log line
+        # message: English text description of the log line
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS log (
+            ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            level TEXT NOT NULL,
+            alert BOOLEAN DEFAULT FALSE,
+            username TEXT,
+            ip_route TEXT,
+            type TEXT NOT NULL,
+            message TEXT NOT NULL
         );
         ''')
 
@@ -90,13 +113,41 @@ class DBConfigHandler:
             self.insert_or_update_parameter( 'max_session_age', 'int', 30 )
             # Disable non-admin accounts after this number of bad password attempts in a row
             self.insert_or_update_parameter( 'disable_account_after_bad_pass_attempts', 'int', 10 )
+            #Some Raspberry Pis can have more than one camera
+            self.insert_or_update_parameter( 'cam_number', 'int', 0 )
+            self.insert_or_update_parameter( 'cam_res_width', 'int', 640 )
+            self.insert_or_update_parameter( 'cam_res_height', 'int', 480 )
 
         ip_lists = self.get_ip_allow_list()
         self.ip_response = dict()
         self.ip_white_list = ip_lists['whitelisted']
         self.ip_black_list = ip_lists['blacklisted']
         self.enforce_ip_whitelist = self.get_parameter_value('enforce_ip_whitelist')
-            
+     
+    def write_log_line( self, level, alert, username, ip_route, log_type, message ):
+        
+        # Avoid the caller being able to evade a log line being written by passing a bad username
+        # Attempt to safely write to the log whatever they passed in
+        # Some types of log lines can genuinely not have username where the user has not yet authenticated
+        if username is None:
+            username = '';
+        else:
+            if not DBConfigHandler.validate_utf8_string( username, max_length=DBConfigHandler.MAX_USERNAME_LENGTH ):   
+                username = str(username)
+                username = username[ :DBConfigHandler.MAX_USERNAME_LENGTH ]
+                          
+        try:
+            insert_log_line_sql = "INSERT INTO log (level, alert, username, ip_route, type, message) VALUES( ?,?,?,?,?,? )"
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute(insert_log_line_sql, (level, alert, username, ip_route, log_type, message))
+            conn.commit()
+        except Exception as e:
+            print(f"An error occurred (write_log_line): {e}")
+        finally:
+            if conn:
+               conn.close()    
+           
 
     def is_app_in_unathenticated_state(self):
         if self.is_pass_table_empty() and self.get_parameter_value('auth_state') == 'nopass':
@@ -426,7 +477,7 @@ class DBConfigHandler:
             conn.commit()
             return response_uuid;
         except Exception as e:
-            print(f"An error occurred: {e}")
+            print(f"An error occurred (generate_challenge_response): {e}")
             return None   
         finally:
             if conn:
