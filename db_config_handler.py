@@ -9,6 +9,7 @@ import bcrypt
 import binascii
 import hashlib
 import ipaddress
+import time
 
 class DBConfigHandler:
     
@@ -21,6 +22,10 @@ class DBConfigHandler:
     def __init__(self, db_path):
         self.db_path = db_path
         self.initialize_database()
+        
+        self.delete_old_log_lines()                
+        self.next_log_line_delete_time = int(time.time()) + 86400
+
         
     def read_only_connection(self):
         return sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True)
@@ -89,6 +94,7 @@ class DBConfigHandler:
         # message: English text description of the log line
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, 
             ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             level TEXT NOT NULL,
             alert BOOLEAN DEFAULT FALSE,
@@ -113,30 +119,45 @@ class DBConfigHandler:
             self.insert_or_update_parameter( 'max_session_age', 'int', 30 )
             # Disable non-admin accounts after this number of bad password attempts in a row
             self.insert_or_update_parameter( 'disable_account_after_bad_pass_attempts', 'int', 10 )
-            #Some Raspberry Pis can have more than one camera
+            #Some Raspberry Pis can have more than one camera - this stores which camera we are looking at
             self.insert_or_update_parameter( 'cam_number', 'int', 0 )
+            # The currently user selected resolution for the camera
             self.insert_or_update_parameter( 'cam_res_width', 'int', 640 )
             self.insert_or_update_parameter( 'cam_res_height', 'int', 480 )
+            # Delete log lines after this number of days
+            self.insert_or_update_parameter( 'delete_log_after_days', 'int', 90 )
 
         ip_lists = self.get_ip_allow_list()
         self.ip_response = dict()
         self.ip_white_list = ip_lists['whitelisted']
         self.ip_black_list = ip_lists['blacklisted']
         self.enforce_ip_whitelist = self.get_parameter_value('enforce_ip_whitelist')
+        
      
     def write_log_line( self, level, alert, username, ip_route, log_type, message ):
         
-        # Avoid the caller being able to evade a log line being written by passing a bad username
-        # Attempt to safely write to the log whatever they passed in
-        # Some types of log lines can genuinely not have username where the user has not yet authenticated
-        if username is None:
-            username = '';
-        else:
-            if not DBConfigHandler.validate_utf8_string( username, max_length=DBConfigHandler.MAX_USERNAME_LENGTH ):   
-                username = str(username)
-                username = username[ :DBConfigHandler.MAX_USERNAME_LENGTH ]
-                          
+        # Expire old log lines once per day
+        if time.time() > self.next_log_line_delete_time:
+            self.delete_old_log_lines()                
+            self.next_log_line_delete_time = int(time.time()) + 86400
+       
         try:
+            # Avoid the caller being able to evade a log line being written by passing a bad username
+            # Attempt to safely write to the log whatever they passed in
+            # Some types of log lines can genuinely not have username where the user has not yet authenticated 
+            if username is None:
+                username = '';
+            else:
+                if not DBConfigHandler.validate_utf8_string( username, max_length=DBConfigHandler.MAX_USERNAME_LENGTH ):   
+                    username = str(username)
+                    username = username[ :DBConfigHandler.MAX_USERNAME_LENGTH ]
+            
+            # Set a maximum log message limit to avoid overflows on bad strings
+            if message is None or message == '':
+                message = 'Expecting a log message but unexpectedly none set.'
+            if len(message) > 4096:
+                message = message[:4096]+ ' ... log message truncated at 4096 characters'
+        
             insert_log_line_sql = "INSERT INTO log (level, alert, username, ip_route, type, message) VALUES( ?,?,?,?,?,? )"
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -147,8 +168,46 @@ class DBConfigHandler:
         finally:
             if conn:
                conn.close()    
-           
+    
+    # Roll off old log lines
+    def delete_old_log_lines( self ):
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            min_time = datetime.now() - timedelta(days=self.get_parameter_value('delete_log_after_days') )
+            cursor.execute('DELETE FROM log WHERE ts < ?', (min_time,) )
+            conn.commit()
+        except Exception as e:
+            print(f"An error occurred (delete_old_log_lines): {e}")
+        finally:
+            if conn:
+               conn.close()
+    
+    # Retrieve log lines, optionally from a specific point in the log
+    # from_line is an ID number before which we want to retrieve log lines
+    # up to a limit (implements paging)    
+    def get_logs_paged(self, from_line=None, limit=50):
+    
+        try:
+            conn = self.read_only_connection()
+            cursor = conn.cursor()
 
+            if from_line is None:
+                sql = "SELECT id, ts, level, alert, username, ip_route, type, message FROM log ORDER BY ts DESC LIMIT ?";
+                cursor.execute(sql, (limit,))
+            else:
+                sql = "SELECT id, ts, level, alert, username, ip_route, type, message FROM log WHERE id < ? ORDER BY ts DESC LIMIT ?";
+                cursor.execute(sql, (from_line, limit))
+            
+            results = cursor.fetchall()
+            return results
+        except Exception as e:
+            print(f"An error occurred (get_log): {e}")
+        finally:
+            if conn:
+               conn.close()  
+
+    # True if the app has not yet been configured with an initial user account
     def is_app_in_unathenticated_state(self):
         if self.is_pass_table_empty() and self.get_parameter_value('auth_state') == 'nopass':
             return True
@@ -170,7 +229,8 @@ class DBConfigHandler:
             return True
         
         return False
-        
+    
+    # Expands out an IPv6 address with an optional wildcard character on the end
     # Assumes a valid ipv6 address otherwise returns itself
     def expand_ipv6_with_wildcard(ip_address):
         ip_address = ip_address.strip().lower()
@@ -203,6 +263,13 @@ class DBConfigHandler:
     # Is it a valid whole IP address (either IPv4 or IPv6)
     def is_valid_ip_address(ip_address):
         try:
+            if ip_address is None:
+                return False
+            if not isinstance(ip_address, str):
+                return False
+            ip_address = ip_address.strip()
+            if len( ip_address ) < 1 or len(ip_address) > 39:
+                return False
             ipaddress.ip_address(ip_address)
             return True
         except ValueError:
@@ -243,8 +310,8 @@ class DBConfigHandler:
 
         return False
                 
-    
-    #Checks every IP is on the whitelist and none of them are on the blacklist
+    # Accepts a list of IP addresses
+    # Returns True if every IP passed on is on the whitelist and none of them are on the blacklist
     def is_ip_list_allowed( self, ip_list_to_check ):
     
             if len( self.ip_black_list ) > 0:
@@ -288,6 +355,7 @@ class DBConfigHandler:
         return new_hex_hash == hex_hash
         
     # Considerably faster than bcrypt
+    # Used for user sessions
     def sha512_hash(item):
         h = hashlib.sha512(item.encode()) 
         return str(h.hexdigest())
@@ -1046,7 +1114,7 @@ class DBConfigHandler:
                 return False  # Item does not exist
 
         except Exception as e:
-            print(f"An error occurred: {e}")
+            print(f"An error occurred (validate_challege): {e}")
             return None
         finally:
             if conn:

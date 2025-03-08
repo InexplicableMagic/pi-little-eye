@@ -6,6 +6,7 @@ const videoURL = '/api/v1/video_feed';
 const testAuthStateURL = '/api/v1/test_auth_state';
 const getConfigURL = '/api/v1/get_config';
 const setConfigURL = '/api/v1/set_config';
+const getLogsURL = '/api/v1/get_logs';
 const logoutURL = '/api/v1/logout';
 const accountManagementURL = '/api/v1/account_management';
 
@@ -498,6 +499,7 @@ function generateUserList(data, current_username, divId) {
   targetDiv.innerHTML = '';
   targetDiv.appendChild(table);
 }
+
 
 function populateSelectWithResolutions(selectName, resolutions, currentResolution) {
     // Access the select element by its ID

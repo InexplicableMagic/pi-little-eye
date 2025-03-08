@@ -22,21 +22,34 @@ def is_authenticated_with_challenge( challenge ):
     if dbch.validate_challege( challenge ):
         return is_authenticated()
     else:
+        log_entry( 'warning', 'bad_challenge', f"Bad authentication attempt: incorrect challenge token received", alert=True )
         return(False, "Failed to validate challenge", 401, None)
-    
+
+# Look in the request and various headers for the client's IP address
+# Might be multiple addresses if behind a proxy
 def get_list_of_possible_client_ips():
     possible_client_ips = [  ]
     if DBConfigHandler.is_valid_ip_address( request.remote_addr ):
         possible_client_ips.append( request.remote_addr.lower().strip() )
-    # List of headers that proxies might add as the client IP
-    # These are untrusted as might be manipulated by the calling client
-    # However, it's worth checking as equally the client may not be able to modify them
-    speculative_header_list = [ 'HTTP_X_FORWARDED_FOR', 'X-Real-IP', 'CF-Connecting-IP', 'CF-Pseudo-IPv4' ]
+    
+    # List of untrusted headers that common proxies might add as the client IP
+    # These are untrusted as they can be easily manipulated by the calling client
+    # When whitelisting, all IPs found have to be on the whitelist to enable access. Any single blacklisted IP found will cause access to be denied.
+    # So client manipulation of these headers is pointless as the only effect is the client could potentially lock themselves out. Changing the headers won't enable access.
+    # However, it's worth checking as equally the client may not have the capability to modify the headers and an intervening proxy may set them with valid values.
+    # 'X-Forwarded-For' is filtered out by waitress by default but can be enabled. However, if enabled it substitutes for the client address in remote_addr and so potentially 
+    # overwrites the actual client IP with a fake one. So this is risky to enable by default unless confident about the proxy configuration.
+    speculative_header_list = [ 'X-Forwarded', 'X-Real-IP', 'X-Client-IP', 'X-Cluster-Client-IP', 'True-Client-IP', 'CF-Connecting-IP', 'CF-Pseudo-IPv4' ]
     for header in speculative_header_list:
-        untrusted_header_ip = request.environ.get(header, None)
+        untrusted_header_ip = request.headers.get(header, None)
         if untrusted_header_ip is not None:
-            if DBConfigHandler.is_valid_ip_address( untrusted_header_ip ):
-                possible_client_ips.append( untrusted_header_ip.lower().strip() )
+            if isinstance(untrusted_header_ip, str):
+                # Some headers comma separated multiple IPs such as X-Forwarded-For
+                possible_untrusted_ip_list = untrusted_header_ip.split(',')
+                for possible_untrusted_ip in possible_untrusted_ip_list:
+                    possible_untrusted_ip = possible_untrusted_ip.lower().strip()
+                    if DBConfigHandler.is_valid_ip_address( possible_untrusted_ip ):
+                        possible_client_ips.append( possible_untrusted_ip )
     return possible_client_ips
 
 def is_authenticated( ):
@@ -50,12 +63,16 @@ def is_authenticated( ):
                         if authenticated:
                             return (True, "Authenticated", 200, username.lower() )
                         else:
+                            if username is None:
+                                username = ''
+                            log_entry( 'info', 'login_fail', f"Cookie authentication failure for username: {username}", alert=False, username=username )
                             return (False, "Authentication failure", 401, None)
                 else:
                     return (False, "App in unauthenticated state", 401, None)
             else:
                 return (False, "No auth cookie sent", 400, None)
         else:
+            log_entry( 'warning', 'ip_block', f"Authentication attempt from a disallowed IP", alert=True )
             return (False, "IP disallowed", 403, None)
             
         return(False, "Unknown error", 500, None)
@@ -63,7 +80,6 @@ def is_authenticated( ):
 def log_entry( level, log_type, message, alert = False, ip_route=None, username=None ):
     ip_route = ','.join( get_list_of_possible_client_ips() )
     dbch.write_log_line( level, alert, username, ip_route, log_type, message )
-    
 
 @app.route('/api/v1/video_feed', methods=['GET'])
 @nocache
@@ -217,7 +233,24 @@ def set_config():
                 response = make_response( jsonify ( { 'error': True, 'message': 'CSRF problem', 'err_type': 'csrf_problem' } ), 400 )
     
     return response
-    
+
+@app.route('/api/v1/get_logs', methods=['GET'])
+@nocache
+def get_logs():
+    response = make_response( jsonify(  { 'error': True, 'message': 'unknown error' } ), 500 )
+    (authenticated, message, http_code, username) = is_authenticated( )
+    if not authenticated:
+        response =  make_response( jsonify ( { 'error': True, 'message': message } ), http_code )
+    else:
+        current_user_permissions = dbch.get_user_permissions( username )
+        if current_user_permissions == 'admin':
+            logs = dbch.get_logs_paged(  )
+            response = make_response( jsonify ( { 'error': False, 'message': '', 'logs': logs } ), 200 )
+        else:
+            response = make_response( jsonify ( { 'error': True, 'message': 'Only admin user can see the logs' } ), 403 )
+        
+    return response
+   
 # Lock/unlock or delete a user account
 @app.route('/api/v1/account_management', methods=['POST'] )
 @nocache
@@ -266,7 +299,7 @@ def account_management():
                         response = make_response( jsonify ( { 'error': True, 'message': 'Only admin account can perform this operation', 'err_type': 'needs_admin' } ), 403 )
             else:
                 response = make_response( jsonify ( { 'error': True, 'message': 'CSRF parameter or cookie problem', 'err_type': 'csrf_problem' } ), 400 )
-                log_entry( 'warning', 'csrf', f"Cross-site script check failure in account management. Possible malicious link click.", alert=True )
+                log_entry( 'warning', 'csrf', f"Anti cross-site script check failure in account management. Might be a browser cookie problem but could indicate a possible malicious link click.", alert=True )
     
     return response
     
@@ -314,6 +347,7 @@ def login():
                             response = make_response( jsonify ( { 'error': True, 'message': 'Bad challenge received.' } ), 400 )
                             log_entry( 'warning', 'bad_challenge', f"Bad login attempt: incorrect challenge token received", alert=True, username=username )
                     else:
+                        log_entry( 'warning', 'login_fail', f"Login attempt with incorrect password format.", alert=True, username=username )
                         response = make_response( jsonify ( { 'error': True, 'message': 'Invalid password format' } ), 400 )    
                 else:
                     response = make_response( jsonify ( { 'error': True, 'message': 'Invalid username format' } ), 400 )
@@ -350,6 +384,7 @@ def set_pass():
                         if dbch.is_app_in_unathenticated_state():
                             if username_postdata:
                                 if dbch.set_pass( username_postdata, 'admin', new_password ):
+                                    log_entry( 'info', 'password_set', f"Initial admin password was set with username {username_postdata}.", username=username_postdata )
                                     response = make_response( jsonify( { 'error': False, 'message': 'Password set.' } ), 200 )
                                 else:
                                     response = make_response( jsonify( { 'error': True, 'message': 'Failed to set password.' } ), 500 )
@@ -394,6 +429,7 @@ def set_pass():
                                                 else:
                                                     response = make_response( jsonify( { 'error': True, 'message': 'Error, cant set own user pass','err_type': 'no_set_own_user' } ), 400 )
                                             else:
+                                                log_entry( 'warning', 'password_failure', f"User {username_authenticated} tried to change password for user {username_postdata} via the API but was not permitted as not admin.", username=username_authenticated, alert=True )
                                                 response = make_response( jsonify ( { 'error': True, 'message': 'Not authorized to set password for a different user', 'err_type': 'bad_group' } ), 403 )                    
                             
                     else:
@@ -403,7 +439,7 @@ def set_pass():
                     response = make_response( jsonify ( { 'error': True, 'message': 'username,new-password and challenge parameters must be set in POST request.', 'err_type': 'bad_post' } ), 400 )
             else:
                 response = make_response( jsonify ( { 'error': True, 'message': 'CSRF parameter or cookie problem', 'err_type': 'csrf_problem' } ), 400 )
-                log_entry( 'warning', 'csrf', f"Cross-site script check failure on trying to set password. Possible malicious link click.", alert=True )
+                log_entry( 'warning', 'csrf', f"Anti cross-site script check failure on trying to set password. Might be a browser cookie problem but could indicate a possible malicious link click.", alert=True )
         else:
             response = make_response( jsonify ( { 'error': True, 'message': 'JSON parse error', 'err_type': 'json_parse' } ), 400 )
     else:
@@ -439,7 +475,7 @@ if __name__ == '__main__':
     dbch = DBConfigHandler("security_cam_state.sqlite")
     ch = CameraHandler( dbch )
     dbch.write_log_line( 'info', False, '','', 'software_started', 'Security camera software was started' )
-    serve(app, host='0.0.0.0', port=5000)
+    serve(app, host='0.0.0.0', port=5000 )
     
 
     
