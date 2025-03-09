@@ -57,12 +57,13 @@
             <button id="change-user-pass-button">Change Password</button>
         </div>
     </div>
-    <div id="logs">
+    <div id="logs-div">
         
     </div>
     <script>var csrfToken = "{{ csrf_token }}";</script>
     <script>resetConfigOnUI(); </script>
     <script>addEventListeners();</script>
     <script>get_auth_state();</script>
+    <script>addLogsToUI();</script>
 </body>
 </html>

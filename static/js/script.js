@@ -540,6 +540,106 @@ function getSelectedResolution(selectName) {
     return [width, height];
 }
 
+function convertLogDataToHTMLTable( log_data ){
+
+    const column_ordering = [
+        { key:'Datestamp', col_num: 1 },
+        { key:'Level', col_num: 2 },
+        { key:'Username', col_num: 4 },
+        { key:'IP', col_num: 5 },
+        { key:'Message', col_num: 7 }
+     ]
+    
+    // Create Table
+    const table = document.createElement('table');
+    table.id='logs-table'
+    table.style.border = '1px solid black';
+    table.style.borderCollapse = 'collapse';
+
+    // Column headings  
+    const thead = table.createTHead();
+    const headerRow = thead.insertRow();
+    column_ordering.forEach( column_header => {
+        const th = document.createElement('th');
+        th.textContent = column_header.key;
+        th.style.border = '1px solid black';
+        th.style.padding = '5px';
+        headerRow.appendChild(th);
+    });
+    
+    // Insert the table rows
+    const tbody = table.createTBody();
+    log_data.forEach(log_line => {
+        const row = tbody.insertRow();
+        column_ordering.forEach(column => {
+          const cell = row.insertCell();
+          cell.textContent = log_line[column.col_num];
+          cell.style.border = '1px solid black';
+          cell.style.padding = '5px';
+        });
+   });
+    
+    return table
+
+}
+
+
+function addLogsToUI( before_id= null){
+    getLogData(before_id)
+    .then( response_data => {
+        if( response_data && response_data.error == false ){
+            table = convertLogDataToHTMLTable( response_data.logs )
+            const targetDiv = document.getElementById('logs-div');
+            targetDiv.innerHTML = '';
+            targetDiv.appendChild(table);
+            //Whether to generate a "next" button
+            if( response_data.page_end > response_data.min_id ){
+                page_from_end = response_data.page_end - 1;
+                const button = document.createElement('button');
+                button.textContent = 'Next';
+                button.addEventListener('click', function(){ addLogsToUI( before_id=page_from_end ); } );
+                targetDiv.appendChild(button);
+            }
+            
+            if( response_data.page_start < response_data.max_id ){
+                page_from_start = response_data.page_start + response_data.page_size;
+                const button = document.createElement('button');
+                button.textContent = 'Prev';
+                button.addEventListener('click', function(){ addLogsToUI( before_id=page_from_start ); } );
+                targetDiv.appendChild(button);
+            }
+        }
+    });
+    
+}
+
+function getLogData( before_id = null ) {
+  
+  url = getLogsURL
+  if( before_id != null ){
+    url = getLogsURL+'?from='+before_id
+  }
+  console.log(before_id)
+  console.log(url)
+  
+  return new Promise((resolve, reject) => {
+    fetch(url)
+      .then(response => {
+        return response.json();
+      })
+      .then(data => {
+        if (data) {
+          resolve(data);
+        } else {
+          throw new Error('Data not found in the response');
+        }
+      })
+      .catch(error => {
+        reject(error);
+      });
+  });
+}
+
 
 function addEventListeners() {
     const setInitialUsername = document.getElementById('setInitialUsername');

@@ -65,7 +65,7 @@ def is_authenticated( ):
                         else:
                             if username is None:
                                 username = ''
-                            log_entry( 'info', 'login_fail', f"Cookie authentication failure for username: {username}", alert=False, username=username )
+                            log_entry( 'info', 'login_fail', f"Cookie authentication failure. Presented cookie not valid.", alert=False, username=username )
                             return (False, "Authentication failure", 401, None)
                 else:
                     return (False, "App in unauthenticated state", 401, None)
@@ -106,7 +106,7 @@ def video_feed():
                     return Response(CameraHandler.create_message_image("No camera detected"),mimetype='image/png')
 
                 # If authentication was successful, return the video feed
-                log_entry( 'info', 'video_viewed', f"Camera viewed by user: {username}", username=username )
+                log_entry( 'info', 'video_viewed', f"Camera viewed", username=username )
                 return Response(ch.generate_camera_video(username), mimetype='multipart/x-mixed-replace; boundary=frame')
             except RuntimeError as e:
                 return Response(CameraHandler.create_message_image("Camera Failure (see logs)"),mimetype='image/png')
@@ -244,8 +244,23 @@ def get_logs():
     else:
         current_user_permissions = dbch.get_user_permissions( username )
         if current_user_permissions == 'admin':
-            logs = dbch.get_logs_paged(  )
-            response = make_response( jsonify ( { 'error': False, 'message': '', 'logs': logs } ), 200 )
+                page_size = 100
+                from_line = request.args.get('from', None)
+                (logs, min_id, max_id) = dbch.get_logs_paged( from_line=from_line, page_size=page_size )
+                page_start = -1
+                page_end = -1
+                if len(logs) > 0:
+                    page_start = logs[0][0]
+                    page_end = logs[-1][0]
+                
+                response = make_response( jsonify ( {   'error': False, 
+                                                        'message': '', 
+                                                        'min_id': min_id,           #Minimum ID available in the logs (earliest log line)
+                                                        'max_id': max_id,           #Maximum ID available in the logs (latest log line)
+                                                        'page_start': page_start,   #The start ID of the specific page of logs returned (largest ID)
+                                                        'page_end': page_end,       #The end ID of the specific page of logs returned (smallest ID)
+                                                        'page_size': page_size,     #The page size
+                                                        'logs': logs } ), 200 ) 
         else:
             response = make_response( jsonify ( { 'error': True, 'message': 'Only admin user can see the logs' } ), 403 )
         
@@ -339,10 +354,10 @@ def login():
                                 
                                 response = make_response( jsonify ( { 'error': False, 'pass_OK': True, 'message': 'Login successful.' } ), 200 )
                                 dbch.set_auth_token( response, username )
-                                log_entry( 'info', 'login_success', f"User {username} logged in", username=username )
+                                log_entry( 'info', 'login_success', f"Logged in", username=username )
                             else:
                                 response = make_response( jsonify ( { 'error': True, 'pass_OK': False, 'message': 'Login failed with supplied username/pass.' } ), 401 )
-                                log_entry( 'warning', 'login_fail', f"Login credentials failure with username: {username}", alert=True, username=username )
+                                log_entry( 'warning', 'login_fail', f"Login failure with username: \"{username}\". Bad user or pass.", alert=True )
                         else:
                             response = make_response( jsonify ( { 'error': True, 'message': 'Bad challenge received.' } ), 400 )
                             log_entry( 'warning', 'bad_challenge', f"Bad login attempt: incorrect challenge token received", alert=True, username=username )
@@ -384,7 +399,7 @@ def set_pass():
                         if dbch.is_app_in_unathenticated_state():
                             if username_postdata:
                                 if dbch.set_pass( username_postdata, 'admin', new_password ):
-                                    log_entry( 'info', 'password_set', f"Initial admin password was set with username {username_postdata}.", username=username_postdata )
+                                    log_entry( 'info', 'password_set', f"Initial admin password set", username=username_postdata )
                                     response = make_response( jsonify( { 'error': False, 'message': 'Password set.' } ), 200 )
                                 else:
                                     response = make_response( jsonify( { 'error': True, 'message': 'Failed to set password.' } ), 500 )
@@ -392,7 +407,7 @@ def set_pass():
                             # An initial admin password has been set - so check the user is authenticated before allowing a password change
                             (authenticated, message, http_code, username_authenticated) = is_authenticated( )
                             if not authenticated:
-                                log_entry( 'warning', 'auth_failure', f"Authentication failure attempting to set password for user {username_postdata}", alert=True )
+                                log_entry( 'warning', 'auth_failure', f"Authentication failure attempting to set password for user \"{username_postdata}\"", alert=True )
                                 return make_response( jsonify ( { 'error': True, 'message': message, 'err_type': 'auth_failure' } ), http_code )
                             else:
                                 # We have just tested the user can correctly authenticate with this username
@@ -403,10 +418,10 @@ def set_pass():
                                         if dbch.verify_password( username_authenticated, original_password ):
                                             dbch.change_pass( username_authenticated, new_password )
                                             response = make_response( jsonify( { 'error': False, 'message': 'Password changed.' } ), 200 )
-                                            log_entry( 'info', 'password_set', f"User {username_authenticated} changed password", username=username_authenticated )
+                                            log_entry( 'info', 'password_set', f"Changed password", username=username_authenticated )
                                         else:
                                             response = make_response( jsonify ( { 'error': True, 'message': 'Failed to verify original password', 'err_type': 'oiginal_pass_failure' } ), 401 )
-                                            log_entry( 'warning', 'password_failure', f"User {username_authenticated} tried to change password but entered incorrect original password", username=username_authenticated, alert=True )
+                                            log_entry( 'warning', 'password_failure', f"Tried to change password but entered incorrect original password", username=username_authenticated, alert=True )
                                     else:
                                         response = make_response( jsonify ( { 'error': True, 'message': 'Original password not set', 'err_type': 'pass_not_set' } ), 400 )
                                 else:
@@ -421,7 +436,7 @@ def set_pass():
                                                     if not dbch.test_user_exists( username_postdata ):
                                                         if dbch.set_pass( username_postdata, 'viewer', new_password ):
                                                             response = make_response( jsonify( { 'error': False, 'message': 'Password set.' } ), 200 )
-                                                            log_entry( 'info', 'password_set', f"Admin user {username_authenticated} set password for user {username_postdata}", username=username_authenticated )
+                                                            log_entry( 'info', 'password_set', f"Admin set password for user {username_postdata}", username=username_authenticated )
                                                         else:
                                                             response = make_response( jsonify( { 'error': False, 'message': 'Failed to set password.' } ), 500 )
                                                     else:
@@ -429,7 +444,7 @@ def set_pass():
                                                 else:
                                                     response = make_response( jsonify( { 'error': True, 'message': 'Error, cant set own user pass','err_type': 'no_set_own_user' } ), 400 )
                                             else:
-                                                log_entry( 'warning', 'password_failure', f"User {username_authenticated} tried to change password for user {username_postdata} via the API but was not permitted as not admin.", username=username_authenticated, alert=True )
+                                                log_entry( 'warning', 'password_failure', f"Tried to change password for user \"{username_postdata}\" via the API but denied as not admin.", username=username_authenticated, alert=True )
                                                 response = make_response( jsonify ( { 'error': True, 'message': 'Not authorized to set password for a different user', 'err_type': 'bad_group' } ), 403 )                    
                             
                     else:
@@ -475,7 +490,7 @@ if __name__ == '__main__':
     dbch = DBConfigHandler("security_cam_state.sqlite")
     ch = CameraHandler( dbch )
     dbch.write_log_line( 'info', False, '','', 'software_started', 'Security camera software was started' )
-    serve(app, host='0.0.0.0', port=5000 )
+    serve(app, host='0.0.0.0', port=5000, threads=50 )
     
 
     

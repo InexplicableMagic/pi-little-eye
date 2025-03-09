@@ -186,23 +186,34 @@ class DBConfigHandler:
     # Retrieve log lines, optionally from a specific point in the log
     # from_line is an ID number before which we want to retrieve log lines
     # up to a limit (implements paging)    
-    def get_logs_paged(self, from_line=None, limit=50):
+    def get_logs_paged(self, from_line=None, page_size=100):
     
+        if from_line is not None:
+            try:
+                from_line = int(from_line)
+            except:
+                from_line = None
+                
         try:
             conn = self.read_only_connection()
             cursor = conn.cursor()
 
             if from_line is None:
-                sql = "SELECT id, ts, level, alert, username, ip_route, type, message FROM log ORDER BY ts DESC LIMIT ?";
-                cursor.execute(sql, (limit,))
+                sql = "SELECT id, ts, level, alert, username, ip_route, type, message FROM log ORDER BY id DESC LIMIT ?";
+                cursor.execute(sql, (page_size,))
             else:
-                sql = "SELECT id, ts, level, alert, username, ip_route, type, message FROM log WHERE id < ? ORDER BY ts DESC LIMIT ?";
-                cursor.execute(sql, (from_line, limit))
+                sql = "SELECT id, ts, level, alert, username, ip_route, type, message FROM log WHERE id <= ? ORDER BY id DESC LIMIT ?";
+                cursor.execute(sql, (from_line, page_size))
             
             results = cursor.fetchall()
-            return results
+            
+            # Get min/max stats
+            sql_stats = "SELECT min(id), max(id) FROM log";
+            cursor.execute(sql_stats)
+            min_max = cursor.fetchone()            
+            return (results, min_max[0], min_max[1])
         except Exception as e:
-            print(f"An error occurred (get_log): {e}")
+            print(f"An error occurred (get_logs_paged): {e}")
         finally:
             if conn:
                conn.close()  
