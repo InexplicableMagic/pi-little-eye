@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 from flask import Flask, Response, request, render_template, jsonify, make_response, send_from_directory
-from waitress import serve
+from gevent import pywsgi
 from db_config_handler import *
 from camera_handler import *
 import uuid
@@ -50,6 +50,7 @@ def get_list_of_possible_client_ips():
                     possible_untrusted_ip = possible_untrusted_ip.lower().strip()
                     if DBConfigHandler.is_valid_ip_address( possible_untrusted_ip ):
                         possible_client_ips.append( possible_untrusted_ip )
+
     return possible_client_ips
 
 def is_authenticated( ):
@@ -490,8 +491,10 @@ if __name__ == '__main__':
     dbch = DBConfigHandler("security_cam_state.sqlite")
     ch = CameraHandler( dbch )
     dbch.write_log_line( 'info', False, '','', 'software_started', 'Security camera software was started' )
-    serve(app, host='0.0.0.0', port=5000, threads=50 )
     
+    # TODO: Add keyfile and certfile
+    http_server = pywsgi.WSGIServer( ('0.0.0.0', 5000), app )
+    http_server.serve_forever()
 
-    
+
 

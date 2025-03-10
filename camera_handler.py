@@ -9,6 +9,10 @@ import threading
 import time
 import copy
 import os
+import gc
+
+#Addition
+import gevent
 
 class CameraHandler:
 
@@ -27,13 +31,13 @@ class CameraHandler:
         Picamera2.set_logging(Picamera2.ERROR)
         os.environ["LIBCAMERA_LOG_LEVELS"] = "ERROR"
         #Enquire about the resolutions the attached camera can do
-        self.camera_deteted = False
+        self.camera_detected = False
         self.available_resolutions = []
         resolutions = self.__enumerate_resolutions( self.selected_camera_number )
         if resolutions != None and len(resolutions) > 0:
             self.available_resolutions = resolutions
             self.current_resolution = CameraHandler.__suggest_camera_resolution( resolutions, self.user_selected_res )
-            self.camera_deteted = True
+            self.camera_detected = True
 
     def publish_image(self):
         with self.frame_publish_lock:
@@ -51,7 +55,7 @@ class CameraHandler:
             time.sleep(0.03)
         
     def start_camera(self):
-        if self.camera_deteted:
+        if self.camera_detected:
             with self.camera_state_change_lock:
                 if not self.camera_running:
                     self.picam2 = Picamera2(self.selected_camera_number)
@@ -75,7 +79,9 @@ class CameraHandler:
 
                 self.picam2.stop()
                 self.picam2.close()
+                
                 self.config.write_log_line( 'info', False , '', '', 'camera_stopped', f"Camera switched off." )
+                
 
     # Change the camera resolution - can be set whilst the camera is running
     def change_resolution(self, new_resolution):
@@ -85,7 +91,7 @@ class CameraHandler:
                 if new_resolution[0] > 128 and new_resolution[1] > 128:
                     #Don't change resolution if it's the same as the current resolutions
                     #Validates the resolution passed in is a mode available on this camera
-                    if self.camera_deteted:
+                    if self.camera_detected:
                         new_resolution = CameraHandler.__suggest_camera_resolution( self.available_resolutions, new_resolution )
                         if new_resolution[0] != self.current_resolution[0] or new_resolution[1] != self.current_resolution[1]:
                             # Set the camera resolution
@@ -101,7 +107,7 @@ class CameraHandler:
                             self.config.insert_or_update_parameter( 'cam_res_height', 'int', new_resolution[1] )
 
     def is_camera_detected(self):
-        return self.camera_deteted
+        return self.camera_detected
     
     # Return the cached version of the available camera resolutions
     def get_camera_resolutions( self ):
@@ -221,12 +227,15 @@ class CameraHandler:
                     new_frame = False
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                    gevent.sleep(0)
                 else:
                     # Check for new frames at a slightly faster rate than the camera frame rate
-                    time.sleep(0.01)
+                    #time.sleep(0.01)
+                    gevent.sleep(0.01)
                
             yield (b'--frame\r\n'
                    b'Content-Type: image/png\r\n\r\n' + CameraHandler.create_message_image("Logged out") + b'\r\n')
+           
 
         finally:
             with self.update_login_lock:
@@ -234,7 +243,10 @@ class CameraHandler:
                     self.logged_in_users[username]-=1
                     if self.logged_in_users[username] < 1:
                         del self.logged_in_users[username]
-                        self.config.write_log_line( 'info', False , username, '', 'disconnect', f"User {username} disconnected from camera." )
+                        self.config.write_log_line( 'info', False , username, '', 'disconnect', f"Stopped viewing camera." )
+                    else:
+                        self.config.write_log_line( 'info', False , username, '', 'disconnect', f"Session disconnected." )
             
             if self.get_total_num_viewing_sessions() < 1:
                 self.stop_camera()
+            

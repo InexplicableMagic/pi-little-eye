@@ -316,7 +316,7 @@ class DBConfigHandler:
                 if ip_to_check.startswith( sans_wildcard_char ):
                     return True
             else:
-                if ip_to_check == wildcard_list:
+                if ip_to_check == ip_range:
                     return True
 
         return False
