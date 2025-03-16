@@ -38,12 +38,16 @@
             <textarea id="allowed-ip-list" name="allowed-ip-list" placeholder="192.168.*" rows="4" cols="25"></textarea>
             <label for="allowed-ip-list">List of allowed IP ranges:</label>
             <button onclick="saveConfig();" id="config-save-changes-button">Save Changes</button>
-            <div id="user-list-table">
-            </div>
-            <div id="add-new-user">
+            <div id="user-management-section">
+                <div id="user-list-table">
+                </div>
                 <input id="new-username" placeholder="new username">
                 <input type="password" id="new-user-password" placeholder="initial password">
                 <button id="add-new-user" onclick="addNewUser()" >Add User</button>    
+            </div>
+            <div id="app-key-management-section">
+                <button id="generate-app-key-button" onclick="generate_appkey()" >New App Key</button>
+                <span id="appkey-display-span"></span>
             </div>
             <div>
                 <select id="camera-resolutions-select"></select>

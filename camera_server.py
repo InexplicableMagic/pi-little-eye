@@ -18,13 +18,6 @@ def nocache(view):
         return response
     return no_cache
 
-def is_authenticated_with_challenge( challenge ):
-    if dbch.validate_challege( challenge ):
-        return is_authenticated()
-    else:
-        log_entry( 'warning', 'bad_challenge', f"Bad authentication attempt: incorrect challenge token received", alert=True )
-        return(False, "Failed to validate challenge", 401, None)
-
 # Look in the request and various headers for the client's IP address
 # Might be multiple addresses if behind a proxy
 def get_list_of_possible_client_ips():
@@ -37,8 +30,6 @@ def get_list_of_possible_client_ips():
     # When whitelisting, all IPs found have to be on the whitelist to enable access. Any single blacklisted IP found will cause access to be denied.
     # So client manipulation of these headers is pointless as the only effect is the client could potentially lock themselves out. Changing the headers won't enable access.
     # However, it's worth checking as equally the client may not have the capability to modify the headers and an intervening proxy may set them with valid values.
-    # 'X-Forwarded-For' is filtered out by waitress by default but can be enabled. However, if enabled it substitutes for the client address in remote_addr and so potentially 
-    # overwrites the actual client IP with a fake one. So this is risky to enable by default unless confident about the proxy configuration.
     speculative_header_list = [ 'X-Forwarded', 'X-Real-IP', 'X-Client-IP', 'X-Cluster-Client-IP', 'True-Client-IP', 'CF-Connecting-IP', 'CF-Pseudo-IPv4' ]
     for header in speculative_header_list:
         untrusted_header_ip = request.headers.get(header, None)
@@ -53,7 +44,27 @@ def get_list_of_possible_client_ips():
 
     return possible_client_ips
 
-def is_authenticated( ):
+
+def is_appkey_authenticated( appkey, secret ):
+    if dbch.is_ip_list_allowed( get_list_of_possible_client_ips() ):
+        if not dbch.is_app_in_unathenticated_state():
+            if dbch.validate_appkey_auth( appkey, secret ):
+                return (True, "Authenticated", 200, appkey)
+            else:
+                return (False, "Bad appkey/secret", 401, None)
+        else:
+            return (False, "App in unauthenticated state", 401, None)
+    else:
+        return (False, "IP disallowed", 403, None)
+
+def is_cookie_authenticated_with_challenge( challenge ):
+    if dbch.validate_challege( challenge ):
+        return is_cookie_authenticated()
+    else:
+        log_entry( 'warning', 'bad_challenge', f"Bad authentication attempt: incorrect challenge token received", alert=True )
+        return(False, "Failed to validate challenge", 401, None)
+
+def is_cookie_authenticated( ):
         if dbch.is_ip_list_allowed( get_list_of_possible_client_ips() ):
             session_id = request.cookies.get('session_id', None)
             auth_token = request.cookies.get('auth_token', None)
@@ -71,7 +82,7 @@ def is_authenticated( ):
                 else:
                     return (False, "App in unauthenticated state", 401, None)
             else:
-                return (False, "No auth cookie sent", 400, None)
+                return (False, "No auth cookie sent", 401, None)
         else:
             log_entry( 'warning', 'ip_block', f"Authentication attempt from a disallowed IP", alert=True )
             return (False, "IP disallowed", 403, None)
@@ -82,20 +93,17 @@ def log_entry( level, log_type, message, alert = False, ip_route=None, username=
     ip_route = ','.join( get_list_of_possible_client_ips() )
     dbch.write_log_line( level, alert, username, ip_route, log_type, message )
 
-@app.route('/api/v1/video_feed', methods=['GET'])
+@app.route('/api/v1/video/mjpeg', methods=['GET'])
 @nocache
-def video_feed():
+def video_mjpeg():
     authenticated = False
     if dbch.is_ip_list_allowed( get_list_of_possible_client_ips() ):
-        try:
-            challenge = request.args.get('challenge', None)
-            if challenge is None or (not DBConfigHandler.is_uuid_valid(challenge)):
-                return Response(CameraHandler.create_message_image("No challenge set"),mimetype='image/png')
-            
-            (authenticated, message, http_code, username) = is_authenticated_with_challenge( challenge )
-            
-        except Exception as e:
-            return Response(CameraHandler.create_message_image("Failure validating challenge"),mimetype='image/png')
+        appkey = request.args.get('appkey', None)
+        secret = request.args.get('secret', None)
+        if DBConfigHandler.is_uuid_valid( appkey ) and DBConfigHandler.is_secret_valid( secret ):
+            (authenticated, message, http_code, username) = is_appkey_authenticated(appkey,secret)        
+        else:
+            (authenticated, message, http_code, username) = is_cookie_authenticated( )
         
         if not authenticated:
             # If authentication has failed, return a blank image with a message
@@ -116,7 +124,7 @@ def video_feed():
     else:
          return Response(CameraHandler.create_message_image("IP disallowed"),mimetype='image/png')
 
-@app.route('/api/v1/test_auth_state', methods=['POST'])
+@app.route('/api/v1/test-auth-state', methods=['POST'])
 @nocache
 def auth_state():
     response = make_response( jsonify(  { 'error': True, 'message': 'unknown error' } ), 500 )
@@ -130,7 +138,7 @@ def auth_state():
         if post_data:
             challenge = post_data.get('challenge', None)
             if challenge:
-                (authenticated, message, http_code, username) = is_authenticated_with_challenge( challenge )
+                (authenticated, message, http_code, username) = is_cookie_authenticated_with_challenge( challenge )
                 if authenticated:
                     user_permissions = dbch.get_user_permissions( username )
                     if user_permissions:
@@ -156,7 +164,7 @@ def auth_state():
 def logout():
     response = make_response( jsonify(  { 'error': True, 'message': 'unknown error' } ), 500 )
     
-    (authenticated, message, http_code, this_user_username) = is_authenticated( )
+    (authenticated, message, http_code, this_user_username) = is_cookie_authenticated( )
     if not authenticated:
         return make_response( jsonify ( { 'error': True, 'message': message } ), http_code )
     else:
@@ -172,6 +180,7 @@ def logout():
                         dbch.remove_all_user_sessions( user_to_logout )
                         ch.logout_user( user_to_logout )
                         logout_this_user = False
+                        log_entry( 'info', 'logout', f"Admin logged out user \"{user_to_logout}\"" )
                         response = make_response( jsonify(  { 'error': False, 'message': 'User logged out' } ), 200 )
                     else:
                         response = make_response( jsonify(  { 'error': True, 'message': 'Not authorised to logout other users' } ), 403 )
@@ -179,6 +188,7 @@ def logout():
         if logout_this_user:
             dbch.remove_all_user_sessions( this_user_username )
             ch.logout_user( this_user_username )
+            log_entry( 'info', 'logout', f"Logged out" )
             response = make_response( jsonify (  { 'error': False, 'message': 'logged out' } ), 200 )
             response.delete_cookie('session_id')
             response.delete_cookie('auth_token')
@@ -186,11 +196,11 @@ def logout():
         
     return response 
 
-@app.route('/api/v1/get_config' )
+@app.route('/api/v1/get-config' )
 @nocache
 def get_config():
     response = make_response( jsonify(  { 'error': True, 'message': 'unknown error' } ), 500 )
-    (authenticated, message, http_code, username) = is_authenticated( )
+    (authenticated, message, http_code, username) = is_cookie_authenticated( )
     if not authenticated:
         return make_response( jsonify ( { 'error': True, 'message': message } ), http_code )
     else:
@@ -204,11 +214,11 @@ def get_config():
         
     return response
     
-@app.route('/api/v1/set_config', methods=['POST'] )
+@app.route('/api/v1/set-config', methods=['POST'] )
 @nocache
 def set_config():
     response = make_response( jsonify(  { 'error': True, 'message': 'unknown error' } ), 500 )
-    (authenticated, message, http_code, username) = is_authenticated( )
+    (authenticated, message, http_code, username) = is_cookie_authenticated( )
     
     if not authenticated:
         return make_response( jsonify ( { 'error': True, 'message': message } ), http_code )
@@ -225,21 +235,23 @@ def set_config():
                         dbch.set_config( post_data )
                         # Set options that change the camera state
                         ch.set_config( post_data )
+                        log_entry( 'info', 'config_change', "Modified configuration" )
                         response = make_response( jsonify ( { 'error': False, 'message': 'Config set' } ), 200 )
                     else:
                         response = make_response( jsonify ( { 'error': True, 'message': 'Config validation error' } ), 400 )
                 else:
                     response = make_response( jsonify ( { 'error': True, 'message': 'Only admin user can set the config' } ), 403 )
             else:
+                log_entry( 'warning', 'csrf', f"Anti cross-site script check failure when setting config. Might be a browser cookie problem but could indicate a possible malicious link click.", alert=True )
                 response = make_response( jsonify ( { 'error': True, 'message': 'CSRF problem', 'err_type': 'csrf_problem' } ), 400 )
     
     return response
 
-@app.route('/api/v1/get_logs', methods=['GET'])
+@app.route('/api/v1/get-logs', methods=['GET'])
 @nocache
 def get_logs():
     response = make_response( jsonify(  { 'error': True, 'message': 'unknown error' } ), 500 )
-    (authenticated, message, http_code, username) = is_authenticated( )
+    (authenticated, message, http_code, username) = is_cookie_authenticated( )
     if not authenticated:
         response =  make_response( jsonify ( { 'error': True, 'message': message } ), http_code )
     else:
@@ -268,11 +280,11 @@ def get_logs():
     return response
    
 # Lock/unlock or delete a user account
-@app.route('/api/v1/account_management', methods=['POST'] )
+@app.route('/api/v1/account-management', methods=['POST'] )
 @nocache
 def account_management():
     response = make_response( jsonify(  { 'error': True, 'message': 'unknown error' } ), 500 )
-    (authenticated, message, http_code, username_authenticated) = is_authenticated( )
+    (authenticated, message, http_code, username_authenticated) = is_cookie_authenticated( )
     
     if not authenticated:
         return make_response( jsonify ( { 'error': True, 'message': message } ), http_code )
@@ -294,24 +306,29 @@ def account_management():
                                         dbch.lock_unlock_delete_account( username_postdata, 'lock' )
                                         dbch.remove_all_user_sessions( username_postdata )
                                         ch.logout_user( username_postdata )
+                                        log_entry( 'info', 'account_locked', f"Account \"{username_postdata}\" locked" )
                                         response = make_response( jsonify ( { 'error': False, 'message': 'Account locked' } ), 200 )
                                     elif action == 'unlock':
                                         dbch.lock_unlock_delete_account( username_postdata, 'unlock' )
+                                        log_entry( 'info', 'account_unlocked', f"Account \"{username_postdata}\" unlocked" )
                                         response = make_response( jsonify ( { 'error': False, 'message': 'Account unlocked' } ), 200 )
                                     elif action == 'delete':
                                         dbch.lock_unlock_delete_account( username_postdata, 'delete' )
                                         dbch.remove_all_user_sessions( username_postdata )
                                         ch.logout_user( username_postdata )
+                                        log_entry( 'info', 'account_deleted', f"Account \"{username_postdata}\" deleted" )
                                         response = make_response( jsonify ( { 'error': False, 'message': 'Account deleted' } ), 200 )
                                     else:
                                         response = make_response( jsonify ( { 'error': True, 'message': 'Incorrect action. Must be unlock,lock or delete', 'err_type': 'bad_action' } ), 400 )        
                                 else:
                                     response = make_response( jsonify ( { 'error': True, 'message': 'Cant lock/unlock or delete own account.', 'err_type': 'username_missing' } ), 403 )
                             else:
+                                log_entry( 'warning', 'admin', f"Attempted to perform account management on non-existent account", alert=True )
                                 response = make_response( jsonify ( { 'error': True, 'message': 'username doesnt exist', 'err_type': 'user_not_exists' } ), 400 )
                         else:
                             response = make_response( jsonify ( { 'error': True, 'message': 'Username missing in post data', 'err_type': 'username_missing' } ), 400 )
                     else:
+                        log_entry( 'warning', 'admin', f"Attempted to perform account management but not an admin", alert=True )
                         response = make_response( jsonify ( { 'error': True, 'message': 'Only admin account can perform this operation', 'err_type': 'needs_admin' } ), 403 )
             else:
                 response = make_response( jsonify ( { 'error': True, 'message': 'CSRF parameter or cookie problem', 'err_type': 'csrf_problem' } ), 400 )
@@ -319,7 +336,7 @@ def account_management():
     
     return response
     
-@app.route('/api/v1/get_challenge')
+@app.route('/api/v1/get-challenge')
 @nocache
 def get_challenge():
     #TODO: anti-hammer
@@ -348,7 +365,7 @@ def login():
                             if dbch.verify_password( username, password ):
                                 #Password check passed
                                 #If the user is already correctly authenticated with an existing session then log the current session out before switching to a new one
-                                (authenticated, message, http_code, username_authenticated) = is_authenticated( )
+                                (authenticated, message, http_code, username_authenticated) = is_cookie_authenticated( )
                                 if authenticated:
                                     session_id = request.cookies.get('session_id', None)
                                     dbch.remove_specific_user_session( session_id )
@@ -375,7 +392,7 @@ def login():
     
     return response
 
-@app.route('/api/v1/set_pass', methods=['POST'] )
+@app.route('/api/v1/set-pass', methods=['POST'] )
 @nocache
 def set_pass():
     response = make_response( jsonify( { 'error': True, 'message': 'unknown error', 'err_type': 'other' } ), 500 ) 
@@ -394,7 +411,7 @@ def set_pass():
             csrf_in_cookie = request.cookies.get('csrf_token')
             
             if DBConfigHandler.is_uuid_valid( csrf_in_cookie ) and DBConfigHandler.is_uuid_valid( csrf_in_post ) and csrf_in_cookie == csrf_in_post:        
-                if new_password and challenge:   
+                if new_password and challenge:
                     if dbch.validate_challege( challenge ):
                         # Check if the app is waiting for the initial admin password to be set
                         if dbch.is_app_in_unathenticated_state():
@@ -406,7 +423,7 @@ def set_pass():
                                     response = make_response( jsonify( { 'error': True, 'message': 'Failed to set password.' } ), 500 )
                         else:
                             # An initial admin password has been set - so check the user is authenticated before allowing a password change
-                            (authenticated, message, http_code, username_authenticated) = is_authenticated( )
+                            (authenticated, message, http_code, username_authenticated) = is_cookie_authenticated( )
                             if not authenticated:
                                 log_entry( 'warning', 'auth_failure', f"Authentication failure attempting to set password for user \"{username_postdata}\"", alert=True )
                                 return make_response( jsonify ( { 'error': True, 'message': message, 'err_type': 'auth_failure' } ), http_code )
@@ -437,7 +454,7 @@ def set_pass():
                                                     if not dbch.test_user_exists( username_postdata ):
                                                         if dbch.set_pass( username_postdata, 'viewer', new_password ):
                                                             response = make_response( jsonify( { 'error': False, 'message': 'Password set.' } ), 200 )
-                                                            log_entry( 'info', 'password_set', f"Admin set password for user {username_postdata}", username=username_authenticated )
+                                                            log_entry( 'info', 'password_set', f"Added user {username_postdata}", username=username_authenticated )
                                                         else:
                                                             response = make_response( jsonify( { 'error': False, 'message': 'Failed to set password.' } ), 500 )
                                                     else:
@@ -461,6 +478,40 @@ def set_pass():
     else:
         response = make_response( jsonify( { 'error': True, 'message': 'IP disallowed', 'err_type': 'ip_block' } ), 403 )
         log_entry( 'warning', 'ip_block', f"Attempt to set password by blocked IP", alert=True )
+    
+    return response
+
+@app.route('/api/v1/generate-app-key', methods=['POST'] )
+@nocache
+def generate_app_key():
+    response = make_response( jsonify( { 'error': True, 'message': 'unknown error', 'err_type': 'other' } ), 500 )
+    if dbch.is_ip_list_allowed( get_list_of_possible_client_ips() ):
+        post_data = request.get_json(silent=True)
+        if post_data:
+            challenge = post_data.get('challenge', None)
+            csrf_in_post = post_data.get('csrf_token', None)
+            csrf_in_cookie = request.cookies.get('csrf_token')
+            if DBConfigHandler.is_uuid_valid( csrf_in_cookie ) and DBConfigHandler.is_uuid_valid( csrf_in_post ) and csrf_in_cookie == csrf_in_post:
+                (authenticated, message, http_code, username_authenticated) = is_cookie_authenticated_with_challenge( challenge )
+                if authenticated:
+                    current_user_permissions = dbch.get_user_permissions( username_authenticated )
+                    if current_user_permissions == 'admin':
+                        ( appkey, secret ) = dbch.generate_app_key( )
+                        log_entry( 'info', 'appkey', f"Generated new app key {appkey}", username=username_authenticated )
+                        response = make_response( jsonify ( { 'error': False, 'message': '', 'appkey': appkey, 'secret': secret } ), 200 )
+                    else:
+                        log_entry( 'warning', 'admin', f"Attempted to generate an app key when not admin", username=username_authenticated, alert=True )
+                        response = make_response( jsonify ( { 'error': True, 'message': 'Only admin account can perform this operation', 'err_type': 'needs_admin' } ), 403 )
+                else:
+                    # Shouldn't be able to perform this action unless already logged in
+                    log_entry( 'warning', 'admin', "Unexpected authentication failure when attempting to generate app key", alert=True )
+                    return make_response( jsonify ( { 'error': True, 'message': message, 'err_type': 'auth_failure' } ), http_code )
+            else:
+                log_entry( 'warning', 'csrf', f"Anti cross-site script check failure on trying to generate appkey. Might be a browser cookie problem but could indicate a possible malicious link click.", alert=True )
+                response = make_response( jsonify ( { 'error': True, 'message': 'CSRF parameter or cookie problem', 'err_type': 'csrf_problem' } ), 400 )               
+    else:
+        log_entry( 'warning', 'ip_block', f"Attempt to generate app key by blocked IP", alert=True )
+        response = make_response( jsonify( { 'error': True, 'message': 'IP disallowed', 'err_type': 'ip_block' } ), 403 )
     
     return response
 

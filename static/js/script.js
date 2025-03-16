@@ -1,14 +1,15 @@
 
-const getChallengeURL = '/api/v1/get_challenge';
-const set_pass_url = '/api/v1/set_pass';
+const getChallengeURL = '/api/v1/get-challenge';
+const set_pass_url = '/api/v1/set-pass';
 const loginURL = '/api/v1/login';
-const videoURL = '/api/v1/video_feed';
-const testAuthStateURL = '/api/v1/test_auth_state';
-const getConfigURL = '/api/v1/get_config';
-const setConfigURL = '/api/v1/set_config';
-const getLogsURL = '/api/v1/get_logs';
+const videoURL = '/api/v1/video/mjpeg';
+const testAuthStateURL = '/api/v1/test-auth-state';
+const getConfigURL = '/api/v1/get-config';
+const setConfigURL = '/api/v1/set-config';
+const getLogsURL = '/api/v1/get-logs';
 const logoutURL = '/api/v1/logout';
-const accountManagementURL = '/api/v1/account_management';
+const generateAppKeyURL = '/api/v1/generate-app-key';
+const accountManagementURL = '/api/v1/account-management';
 
 const userTableID = 'user-table'
 
@@ -613,6 +614,36 @@ function addLogsToUI( before_id= null){
     
 }
 
+function generate_appkey(){
+    getChallenge()
+    .then(challenge => { 
+        const data = {
+            challenge: challenge,
+            csrf_token: csrfToken
+        }
+        return fetch(generateAppKeyURL, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(data)
+        }).then(data => {
+            return data.json().then(jsonData => {
+                if(jsonData.error === false){
+                    const appkeydisplay = document.getElementById('appkey-display-span');
+                    appkeydisplay.innerHTML = 'Key: '+jsonData.appkey + ' secret: '+jsonData.secret
+                }else{
+                    console.log( jsonData )
+                }
+          })
+            
+        })
+  })
+  .catch(error => {
+    console.error('Error:', error);
+  });
+}
+
 function getLogData( before_id = null ) {
   
   url = getLogsURL
@@ -679,17 +710,12 @@ function addEventListeners() {
     });
 }
 
-function restartVideoFeed() {
-    getChallenge()
-    .then(challenge => {    
-        // Append the challenge as a GET parameter to the videoURL
-        const urlWithChallenge = `${videoURL}?challenge=${encodeURIComponent(challenge)}`;
-               
+function restartVideoFeed() {                
         // Create an img element
         const img = document.createElement('img');
         
         // Set the src attribute to the URL with the challenge parameter
-        img.src = urlWithChallenge;
+        img.src = videoURL;
         img.id = "video-feed"
         
         // Append the img element to the video container
@@ -705,7 +731,5 @@ function restartVideoFeed() {
         img.onerror = () => {
             console.error('Failed to load the video stream');
         };
-    })
-    .catch(error => console.error('Error:', error));
 }
 

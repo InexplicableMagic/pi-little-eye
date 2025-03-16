@@ -10,6 +10,7 @@ import binascii
 import hashlib
 import ipaddress
 import time
+import secrets
 
 class DBConfigHandler:
     
@@ -50,12 +51,21 @@ class DBConfigHandler:
             )
         ''')
         
-        # Active sessions - list of sessions currently logged in and authorised by cookie
+        # List of active user web sessions currently logged in and authorised by cookie
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS sessions (
                 session_id TEXT PRIMARY KEY NOT NULL UNIQUE,
                 username NOT NULL,
                 token_sha512 TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Application keys for API camera viewers
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS appkeys (
+                appkey TEXT PRIMARY KEY NOT NULL UNIQUE,
+                secret_sha512 TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -425,12 +435,29 @@ class DBConfigHandler:
             return False
         if not isinstance(the_uuid, str):
             return False
+        if not DBConfigHandler.is_valid_utf8( the_uuid ):
+            return False
         if not DBConfigHandler.is_printable(the_uuid):
             return False
-        if len( the_uuid ) != 36:
+        if len(the_uuid) != 36:
             return False
         regex = re.compile(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$', re.I)
         return bool(regex.match(the_uuid))
+        
+    def is_secret_valid( the_secret ):
+        if the_secret is None:
+            return False
+        if not isinstance(the_secret, str):
+            return False
+        if not DBConfigHandler.is_valid_utf8( the_secret ):
+            return False
+        if not DBConfigHandler.is_printable(the_secret):
+            return False
+        if len(the_secret) != 32:
+            return False
+        regex = re.compile(r'^[0-9a-fA-F]{32}$', re.I)
+        return bool(regex.match(the_secret))
+        
     
     def is_parameters_table_empty( self ):
         return self.is_table_empty( "parameters" )
@@ -548,7 +575,7 @@ class DBConfigHandler:
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            response_uuid = str(uuid.uuid4())
+            response_uuid = secrets.token_hex(16)
             expiry_timestamp = datetime.now() + timedelta(minutes=5)
             cursor.execute('INSERT INTO challenge_response (response, expiry) VALUES ( ?, ? )', 
                             (response_uuid, expiry_timestamp))
@@ -561,6 +588,7 @@ class DBConfigHandler:
         finally:
             if conn:
                 conn.close()
+    
         
     def test_user_exists( self, username ):
         if DBConfigHandler.validate_utf8_string( username, max_length=DBConfigHandler.MAX_USERNAME_LENGTH ):
@@ -774,8 +802,8 @@ class DBConfigHandler:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             cursor.execute('DELETE FROM authentication WHERE username = ?', (username,) )
-            query_exists = 'INSERT INTO authentication ( username, permissions, pass_bcrypt, salt ) VALUES (?,?,?,?)'
-            cursor.execute(query_exists, (username, permissions, pass_hash,salt))
+            query_insert_pass = 'INSERT INTO authentication ( username, permissions, pass_bcrypt, salt ) VALUES (?,?,?,?)'
+            cursor.execute(query_insert_pass, (username, permissions, pass_hash,salt))
             conn.commit()
             self.insert_or_update_parameter( 'auth_state', 'string', 'authenticated' )
             return True      
@@ -830,7 +858,7 @@ class DBConfigHandler:
             if not self.test_user_exists( username ):
                  raise ValueError( "Username does not exist" )
                     
-            auth_token = str(uuid.uuid4())
+            auth_token = secrets.token_hex(16)
             # Because we can decide what the token is and ensure it's long and random, we probably don't need to salt it or use bcrypt
             # We use sha512 here because it's considerably faster. Bcrypt takes about half a second on a Raspberry Pi.
             # We use bcrypt with salt for passwords because the user might enter a poor password that is short.
@@ -935,6 +963,58 @@ class DBConfigHandler:
         finally:
             if conn:
                 conn.close()
+
+    def generate_app_key( self ):
+            app_key = str(uuid.uuid4())
+            secret = secrets.token_hex(16)
+            hex_sha512_secret = DBConfigHandler.sha512_hash( secret )
+            try:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                insert_sql = 'INSERT INTO appkeys ( appkey, secret_sha512 ) VALUES ( ?, ? )'
+                cursor.execute(insert_sql, (app_key, hex_sha512_secret ))
+                conn.commit()
+            except Exception as e:
+                print(f"An error occurred (generate_app_key): {e}")
+            finally:
+                if conn:
+                    conn.close()
+            
+            return( app_key, secret )
+    
+    
+    def delete_app_key( self, appkey ):
+            try:
+                if not DBConfigHandler.is_uuid_valid( appkey ):
+                    raise ValueError( "Invalid application key" )
+            
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                delete_sql = 'DELETE FROM appkeys WHERE appkey = ?'
+                cursor.execute(delete_sql, (app_key, ))
+                conn.commit()
+            except Exception as e:
+                print(f"An error occurred (delete_app_key): {e}")
+            finally:
+                if conn:
+                    conn.close()
+            
+            return( app_key, secret )
+
+    def get_app_keys( self ):
+            try:
+                conn = read_only_connection()
+                cursor = conn.cursor()
+                get_sql = 'SELECT appkey FROM appkeys ORDER BY created_at ASC'
+                results = cursor.fetchall( get_sql )
+                return results                
+            except Exception as e:
+                print(f"An error occurred (get_app_keys): {e}")
+            finally:
+                if conn:
+                    conn.close()
+            
+            return( app_key, secret )
 
 
     def set_ip_allow_list( self, ip_white_list, ip_black_list):
@@ -1048,12 +1128,40 @@ class DBConfigHandler:
           self.insert_or_update_parameter( 'enforce_ip_whitelist', 'bool', config_object['enforce_ip_whitelist'] )
           self.enforce_ip_whitelist = config_object['enforce_ip_whitelist']
     
+    def validate_appkey_auth( self, appkey, secret ):
+        try:                    
+            if not DBConfigHandler.is_secret_valid( secret ):
+                raise ValueError( "Secret received is invalid" )
+                
+            if not DBConfigHandler.is_uuid_valid( appkey ):
+                raise ValueError( "Appkey received is invalid" )
+                
+            conn = self.read_only_connection()
+            cursor = conn.cursor()
+            
+            query_exists = "SELECT secret_sha512 from appkeys WHERE appkey = ?"
+            cursor.execute(query_exists, (appkey,))
+            retrieved_secret_sha512 = cursor.fetchone()
+            test_secret_sha512 = DBConfigHandler.sha512_hash( secret )
+            if retrieved_secret_sha512:
+                if len( retrieved_secret_sha512 ) == 1:
+                    if retrieved_secret_sha512[0] == test_secret_sha512:
+                        return True
+                        
+            return False
+            
+        except Exception as e:
+            print(f"An error occurred (validate_appkey_auth): {e}")
+            return False
+        finally:
+            if conn:
+                conn.close()
 
     def validate_token_auth( self, session_id, token_to_test ):
         conn = None
         
         try:                    
-            if not DBConfigHandler.is_uuid_valid( token_to_test ):
+            if not DBConfigHandler.is_secret_valid( token_to_test ):
                 raise ValueError( "Security token received is invalid" )
                 
             if not DBConfigHandler.is_uuid_valid( session_id ):
@@ -1104,8 +1212,8 @@ class DBConfigHandler:
         
             self.expire_challenge_response()
 
-            if not DBConfigHandler.is_uuid_valid(response):
-                raise ValueError( "Invalid UUID" )
+            if not DBConfigHandler.is_secret_valid(response):
+                raise ValueError( "Invalid challenge token" )
 
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
