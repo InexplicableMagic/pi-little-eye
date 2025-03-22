@@ -725,7 +725,26 @@ class DBConfigHandler:
             return result_obj            
         except Exception as e:
             print(f"An error occurred (list_all_username): {e}")
-            return None   
+            return [ ]   
+        finally:
+            if conn:
+                conn.close()
+    
+    def list_all_app_keys( self ):
+        conn = None
+        try:
+            conn = self.read_only_connection()
+            cursor = conn.cursor()
+            app_key_listing_sql = "SELECT appkey FROM appkeys;"
+            cursor.execute(app_key_listing_sql)
+            results = cursor.fetchall()
+            app_keys = [  ]
+            for result in results:
+                app_keys.append( result[0] )
+            return app_keys
+        except Exception as e:
+            print(f"An error occurred (list_all_app_keys): {e}")
+            return [ ]    
         finally:
             if conn:
                 conn.close()
@@ -983,9 +1002,9 @@ class DBConfigHandler:
             return( app_key, secret )
     
     
-    def delete_app_key( self, appkey ):
+    def delete_app_key( self, app_key ):
             try:
-                if not DBConfigHandler.is_uuid_valid( appkey ):
+                if not DBConfigHandler.is_uuid_valid( app_key ):
                     raise ValueError( "Invalid application key" )
             
                 conn = sqlite3.connect(self.db_path)
@@ -998,8 +1017,6 @@ class DBConfigHandler:
             finally:
                 if conn:
                     conn.close()
-            
-            return( app_key, secret )
 
     def get_app_keys( self ):
             try:
@@ -1080,7 +1097,8 @@ class DBConfigHandler:
                         'error': False, 
                         'allowed_ips': list_of_allowed_ips,
                         'enforce_ip_whitelist': self.get_parameter_value('enforce_ip_whitelist'),
-                        'usernames' : self.list_all_usernames()
+                        'usernames' : self.list_all_usernames(),
+                        'app_keys' : self.list_all_app_keys()
                    }
             
         return config_data

@@ -10,9 +10,9 @@ import time
 import copy
 import os
 import gc
-
-#Addition
 import gevent
+
+from db_config_handler import *
 
 class CameraHandler:
 
@@ -194,10 +194,11 @@ class CameraHandler:
             return deep_copied_dict.items()
     
     def logout_user( self, username ):
-        username = username.lower()
-        with self.update_login_lock:
-            if username in self.logged_in_users:
-                del self.logged_in_users[username]
+        if DBConfigHandler.validate_utf8_string( username, max_length=DBConfigHandler.MAX_USERNAME_LENGTH ):    
+            username = username.lower()
+            with self.update_login_lock:
+                if username in self.logged_in_users:
+                    del self.logged_in_users[username]
                
     def get_total_num_viewing_sessions( self ):
         with self.update_login_lock:

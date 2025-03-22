@@ -485,35 +485,63 @@ def set_pass():
 @nocache
 def generate_app_key():
     response = make_response( jsonify( { 'error': True, 'message': 'unknown error', 'err_type': 'other' } ), 500 )
-    if dbch.is_ip_list_allowed( get_list_of_possible_client_ips() ):
-        post_data = request.get_json(silent=True)
-        if post_data:
-            challenge = post_data.get('challenge', None)
-            csrf_in_post = post_data.get('csrf_token', None)
-            csrf_in_cookie = request.cookies.get('csrf_token')
-            if DBConfigHandler.is_uuid_valid( csrf_in_cookie ) and DBConfigHandler.is_uuid_valid( csrf_in_post ) and csrf_in_cookie == csrf_in_post:
-                (authenticated, message, http_code, username_authenticated) = is_cookie_authenticated_with_challenge( challenge )
-                if authenticated:
-                    current_user_permissions = dbch.get_user_permissions( username_authenticated )
-                    if current_user_permissions == 'admin':
-                        ( appkey, secret ) = dbch.generate_app_key( )
-                        log_entry( 'info', 'appkey', f"Generated new app key {appkey}", username=username_authenticated )
-                        response = make_response( jsonify ( { 'error': False, 'message': '', 'appkey': appkey, 'secret': secret } ), 200 )
-                    else:
-                        log_entry( 'warning', 'admin', f"Attempted to generate an app key when not admin", username=username_authenticated, alert=True )
-                        response = make_response( jsonify ( { 'error': True, 'message': 'Only admin account can perform this operation', 'err_type': 'needs_admin' } ), 403 )
+    post_data = request.get_json(silent=True)
+    if post_data:
+        challenge = post_data.get('challenge', None)
+        csrf_in_post = post_data.get('csrf_token', None)
+        csrf_in_cookie = request.cookies.get('csrf_token')
+        if DBConfigHandler.is_uuid_valid( csrf_in_cookie ) and DBConfigHandler.is_uuid_valid( csrf_in_post ) and csrf_in_cookie == csrf_in_post:
+            (authenticated, message, http_code, username_authenticated) = is_cookie_authenticated_with_challenge( challenge )
+            if authenticated:
+                current_user_permissions = dbch.get_user_permissions( username_authenticated )
+                if current_user_permissions == 'admin':
+                    ( appkey, secret ) = dbch.generate_app_key( )
+                    log_entry( 'info', 'appkey', f"Generated new app key {appkey}", username=username_authenticated )
+                    response = make_response( jsonify ( { 'error': False, 'message': '', 'appkey': appkey, 'secret': secret } ), 200 )
                 else:
-                    # Shouldn't be able to perform this action unless already logged in
-                    log_entry( 'warning', 'admin', "Unexpected authentication failure when attempting to generate app key", alert=True )
-                    return make_response( jsonify ( { 'error': True, 'message': message, 'err_type': 'auth_failure' } ), http_code )
+                    log_entry( 'warning', 'admin', f"Attempted to generate an app key when not admin", username=username_authenticated, alert=True )
+                    response = make_response( jsonify ( { 'error': True, 'message': 'Only admin account can perform this operation', 'err_type': 'needs_admin' } ), 403 )
             else:
-                log_entry( 'warning', 'csrf', f"Anti cross-site script check failure on trying to generate appkey. Might be a browser cookie problem but could indicate a possible malicious link click.", alert=True )
-                response = make_response( jsonify ( { 'error': True, 'message': 'CSRF parameter or cookie problem', 'err_type': 'csrf_problem' } ), 400 )               
-    else:
-        log_entry( 'warning', 'ip_block', f"Attempt to generate app key by blocked IP", alert=True )
-        response = make_response( jsonify( { 'error': True, 'message': 'IP disallowed', 'err_type': 'ip_block' } ), 403 )
+                # Shouldn't be able to perform this action unless already logged in
+                log_entry( 'warning', 'admin', "Unexpected authentication failure when attempting to generate app key", alert=True )
+                return make_response( jsonify ( { 'error': True, 'message': message, 'err_type': 'auth_failure' } ), http_code )
+        else:
+            log_entry( 'warning', 'csrf', f"Anti cross-site script check failure on trying to generate appkey. Might be a browser cookie problem but could indicate a possible malicious link click.", alert=True )
+            response = make_response( jsonify ( { 'error': True, 'message': 'CSRF parameter or cookie problem when generating an app key', 'err_type': 'csrf_problem' } ), 400 )               
     
     return response
+
+@app.route('/api/v1/delete-app-key', methods=['POST'] )
+@nocache
+def delete_app_key():
+    response = make_response( jsonify( { 'error': True, 'message': 'unknown error', 'err_type': 'other' } ), 500 )
+    post_data = request.get_json(silent=True)
+    if post_data:
+        csrf_in_post = post_data.get('csrf_token', None)
+        csrf_in_cookie = request.cookies.get('csrf_token')
+        if DBConfigHandler.is_uuid_valid( csrf_in_cookie ) and DBConfigHandler.is_uuid_valid( csrf_in_post ) and csrf_in_cookie == csrf_in_post:
+            (authenticated, message, http_code, username_authenticated) = is_cookie_authenticated( )
+            if authenticated:
+                current_user_permissions = dbch.get_user_permissions( username_authenticated )
+                if current_user_permissions == 'admin':
+                        app_key_to_delete = post_data.get('app_key', None)
+                        log_entry( 'info', 'appkey', f"Deleted app key {app_key_to_delete}", username=username_authenticated )
+                        ch.logout_user( app_key_to_delete )
+                        dbch.delete_app_key( app_key_to_delete )
+                        response = make_response( jsonify ( { 'error': False, 'message': 'App key deleted' } ), 200 )
+                else:
+                    log_entry( 'warning', 'admin', f"Attempted to delete an app key when not admin", username=username_authenticated, alert=True )
+                    response = make_response( jsonify ( { 'error': True, 'message': 'Only admin account can delete an app key', 'err_type': 'needs_admin' } ), 403 )
+            else:
+                # Shouldn't be able to perform this action unless already logged in
+                log_entry( 'warning', 'admin', "Unexpected authentication failure when attempting to delete app key", alert=True )
+                return make_response( jsonify ( { 'error': True, 'message': message, 'err_type': 'auth_failure' } ), http_code )
+        else:
+            log_entry( 'warning', 'csrf', f"Anti cross-site script check failure on trying to delete appkey. Might be a browser cookie problem but could indicate a possible malicious link click.", alert=True )
+            response = make_response( jsonify ( { 'error': True, 'message': 'CSRF parameter or cookie problem on deleting an app key', 'err_type': 'csrf_problem' } ), 400 )               
+    
+    return response
+
 
 @app.route('/robots.txt')
 def static_from_root():

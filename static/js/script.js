@@ -10,6 +10,7 @@ const getLogsURL = '/api/v1/get-logs';
 const logoutURL = '/api/v1/logout';
 const generateAppKeyURL = '/api/v1/generate-app-key';
 const accountManagementURL = '/api/v1/account-management';
+const deleteAppKeyURL = '/api/v1/delete-app-key';
 
 const userTableID = 'user-table'
 
@@ -76,6 +77,31 @@ function lockUnlockDelete(username, action) {
   });
 
 }
+
+function deleteAppKey(app_key) {
+  
+  const data = {
+    csrf_token: csrfToken,
+    app_key: app_key
+  };
+  
+  return fetch(deleteAppKeyURL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(data)
+  })
+  .then(response => {
+    if (!response.ok) {
+      console.log(response)
+      throw new Error('Network error returned from deleteAppKey');
+    }
+    return response.json();
+  });
+
+}
+
 
 
 function setPass(username, password, challenge, orignalPassword = null) {
@@ -179,10 +205,11 @@ function resetConfigOnUI(){
             }else{
                 document.getElementById('any-ip-radio').checked = true;
             }
-            generateUserList( config.usernames, config.current_username, 'user-list-table' )
-            populateSelectWithResolutions( 'camera-resolutions-select', config.available_camera_resolutions, config.current_camera_resolution )
+            generateUserListTable( config.usernames, config.current_username, 'user-list-table' );
+            generateAppKeyTable( config.app_keys, 'app-key-list-table' );
+            populateSelectWithResolutions( 'camera-resolutions-select', config.available_camera_resolutions, config.current_camera_resolution );
         }else{
-            console.log("No config allowed")
+            console.log("No config allowed");
         }
     });
 }
@@ -400,7 +427,7 @@ function login( username, password ){
 
 //Convert the list of camera users into an HTML table
 //for display in the configuration options
-function generateUserList(data, current_username, divId) {
+function generateUserListTable(data, current_username, divId) {
 
   // Get the target div
   const targetDiv = document.getElementById(divId);
@@ -499,6 +526,54 @@ function generateUserList(data, current_username, divId) {
   // Clear the target div and append the table
   targetDiv.innerHTML = '';
   targetDiv.appendChild(table);
+}
+
+function generateAppKeyTable(data, appKeyDiv) {
+
+  // Get the target div
+  const targetDiv = document.getElementById(appKeyDiv);
+  if (!targetDiv) {
+    console.error(`Div with id "${appKeyDiv}" not found.`);
+    return;
+  }
+  
+  const table = document.createElement('table');
+  table.id=userTableID
+  table.style.border = '1px solid black';
+  table.style.borderCollapse = 'collapse';
+
+  const thead = table.createTHead();
+  const headerRow = thead.insertRow();
+  const th = document.createElement('th');
+  th.textContent = "App Key"
+  th.style.border = '1px solid black';
+  th.style.padding = '5px';
+  headerRow.appendChild(th);
+  
+  const tbody = table.createTBody();
+  data.forEach(appkey => {
+    const row = tbody.insertRow();
+    const cell = row.insertCell();
+    cell.textContent = appkey;
+    cell.style.border = '1px solid black';
+    cell.style.padding = '5px';
+    
+    const button = document.createElement('button');
+    button.textContent = 'Delete';
+    button.style.marginLeft = '5px';
+    button.addEventListener('click', () => {
+        deleteAppKey( appkey ).then ( () => {
+            console.log("Deleted app key");
+            resetConfigOnUI();
+        });
+    });
+    cell.appendChild(button);
+    
+  });
+  
+  targetDiv.innerHTML = '';
+  targetDiv.appendChild(table);
+  
 }
 
 
