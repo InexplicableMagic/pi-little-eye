@@ -22,8 +22,10 @@ class CameraHandler:
         #Currently supports the first found camera
         self.selected_camera_number = config.get_parameter_value( 'cam_number' )
         self.user_selected_res = ( config.get_parameter_value( 'cam_res_width' ), config.get_parameter_value( 'cam_res_height' ) )
+        self.image_rotation_degrees = self.config.get_parameter_value( 'image_rotation' )
         self.camera_state_change_lock = threading.Lock()
         self.frame_publish_lock = threading.Lock()
+        self.option_change_lock = threading.Lock()
         self.last_frame = None
         self.logged_in_users = dict()
         self.update_login_lock = threading.Lock()
@@ -45,7 +47,9 @@ class CameraHandler:
         while self.camera_running:
             frame = self.picam2.capture_array()
             frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2RGB)  # Convert XRGB to RGB
-            frame = CameraHandler.add_timestamp(frame)
+            with self.option_change_lock:
+               frame = CameraHandler.rotate_image( frame, self.image_rotation_degrees )
+               frame = CameraHandler.add_timestamp(frame)
             ret, buffer = cv2.imencode('.jpg', frame)
             frame = buffer.tobytes()
             with self.frame_publish_lock:
@@ -53,6 +57,22 @@ class CameraHandler:
                 self.frame_num +=1
             # Up to about 30FPS
             time.sleep(0.03)
+
+    def rotate_image( frame, rotation ):
+        if rotation == 90:
+            return cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+        elif rotation == 180:
+            return cv2.rotate(frame, cv2.ROTATE_180)
+        elif rotation == 270:
+            return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+             
+        return frame
+        
+    def set_new_rotation( self, rotation ):
+        if rotation != None and isinstance(rotation, int) and rotation != self.image_rotation_degrees:
+            if (rotation <= 270) and ((rotation % 90) == 0):
+                with self.option_change_lock:
+                    self.image_rotation_degrees = rotation
         
     def start_camera(self):
         if self.camera_detected:
@@ -131,6 +151,8 @@ class CameraHandler:
             if 'selected_resolution' in post_data:
                 if isinstance( post_data[ 'selected_resolution' ], (list,tuple) ):
                     self.change_resolution( post_data[ 'selected_resolution' ] )
+            if 'image_rotation' in post_data:
+                self.set_new_rotation( post_data[ 'image_rotation' ] )
     
     # Get the resolutions the camera can do  
     # Should be called once on boot           

@@ -231,7 +231,7 @@ def set_config():
                 current_user_permissions = dbch.get_user_permissions( username )
                 if current_user_permissions is not None and current_user_permissions == 'admin':
                     if DBConfigHandler.validate_config_object( post_data ):
-                        # Set options to be stored in the config
+                        # Set options to be stored in the config - config must be validated
                         dbch.set_config( post_data )
                         # Set options that change the camera state
                         ch.set_config( post_data )

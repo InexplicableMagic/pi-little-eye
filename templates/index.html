@@ -30,30 +30,38 @@
     <div id="configuration">
     <p>Configuration</p>
         <div id="admin-only-config">
-            <button onclick="saveConfig();" id="config-save-changes-button">Save Changes</button>
-            <input type="radio" id="any-ip-radio" name="ips-allowed" value="any-ip" checked>
-            <label for="any-ip-radio">Any IP can access camera</label><br/>
-            <input type="radio" id="allowed-ips-radio" name="ips-allowed" value="allowed-ips">
-            <label for="allowed-ips-radio">Only below IP ranges can access camera</label><br/>
-            <textarea id="allowed-ip-list" name="allowed-ip-list" placeholder="192.168.*" rows="4" cols="25"></textarea>
-            <label for="allowed-ip-list">List of allowed IP ranges:</label>
-            <button onclick="saveConfig();" id="config-save-changes-button">Save Changes</button>
-            <div id="user-management-section">
-                <div id="user-list-table">
+            <div id="security-panel">
+                <button onclick="saveConfig();" id="config-save-changes-button">Save Changes</button>
+                <input type="radio" id="any-ip-radio" name="ips-allowed" value="any-ip" checked>
+                <label for="any-ip-radio">Any IP can access camera</label><br/>
+                <input type="radio" id="allowed-ips-radio" name="ips-allowed" value="allowed-ips">
+                <label for="allowed-ips-radio">Only below IP ranges can access camera</label><br/>
+                <textarea id="allowed-ip-list" name="allowed-ip-list" placeholder="192.168.*" rows="4" cols="25"></textarea>
+                <label for="allowed-ip-list">List of allowed IP ranges:</label>
+                <button onclick="saveConfig();" id="config-save-changes-button">Save Changes</button>
+                <div id="user-management-section">
+                    <div id="user-list-table">
+                    </div>
+                    <input id="new-username" placeholder="new username">
+                    <input type="password" id="new-user-password" placeholder="initial password">
+                    <button id="add-new-user" onclick="addNewUser()" >Add User</button>    
                 </div>
-                <input id="new-username" placeholder="new username">
-                <input type="password" id="new-user-password" placeholder="initial password">
-                <button id="add-new-user" onclick="addNewUser()" >Add User</button>    
-            </div>
-            <div id="app-key-management-section">
-                <div id="app-key-list-table">
+                <div id="app-key-management-section">
+                    <div id="app-key-list-table">
+                    </div>
+                    <button id="generate-app-key-button" onclick="generate_appkey()" >New App Key</button>
+                    <span id="appkey-display-span"></span>
+                    
                 </div>
-                <button id="generate-app-key-button" onclick="generate_appkey()" >New App Key</button>
-                <span id="appkey-display-span"></span>
-                
             </div>
-            <div>
-                <select id="camera-resolutions-select"></select>
+            <div id="camera-config-panel">
+                    <select id="camera-resolutions-select"></select>
+                    <select id="camera-rotation-select">
+                        <option value="0">No rotation</option>
+                        <option value="90">90 degrees</option>
+                        <option value="180">180 degrees</option>
+                        <option value="270">270 degrees</option>
+                    </select>
             </div>
         </div>
         <div id="standard-config">

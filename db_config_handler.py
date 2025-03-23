@@ -11,6 +11,7 @@ import hashlib
 import ipaddress
 import time
 import secrets
+import sys
 
 class DBConfigHandler:
     
@@ -136,6 +137,8 @@ class DBConfigHandler:
             self.insert_or_update_parameter( 'cam_res_height', 'int', 480 )
             # Delete log lines after this number of days
             self.insert_or_update_parameter( 'delete_log_after_days', 'int', 90 )
+            # Default image rotation in degrees: 0, 90, 180 or 270
+            self.insert_or_update_parameter( 'image_rotation', 'int', 0 )
 
         ip_lists = self.get_ip_allow_list()
         self.ip_response = dict()
@@ -174,7 +177,7 @@ class DBConfigHandler:
             cursor.execute(insert_log_line_sql, (level, alert, username, ip_route, log_type, message))
             conn.commit()
         except Exception as e:
-            print(f"An error occurred (write_log_line): {e}")
+            print(f"An error occurred (write_log_line): {e}", file=sys.stderr)
         finally:
             if conn:
                conn.close()    
@@ -188,7 +191,7 @@ class DBConfigHandler:
             cursor.execute('DELETE FROM log WHERE ts < ?', (min_time,) )
             conn.commit()
         except Exception as e:
-            print(f"An error occurred (delete_old_log_lines): {e}")
+            print(f"An error occurred (delete_old_log_lines): {e}", file=sys.stderr)
         finally:
             if conn:
                conn.close()
@@ -223,7 +226,7 @@ class DBConfigHandler:
             min_max = cursor.fetchone()            
             return (results, min_max[0], min_max[1])
         except Exception as e:
-            print(f"An error occurred (get_logs_paged): {e}")
+            print(f"An error occurred (get_logs_paged): {e}", file=sys.stderr)
         finally:
             if conn:
                conn.close()  
@@ -480,7 +483,7 @@ class DBConfigHandler:
             # If count is 0, the table is empty
             return count == 0
         except Exception as e:
-            print(e)
+            print(e, file=sys.stderr)
             return None
         finally:
             if conn:
@@ -516,7 +519,7 @@ class DBConfigHandler:
             conn.commit()
             return True
         except Exception as e:
-            print(e)
+            print(e, file=sys.stderr)
             return False
         finally:
             if conn:
@@ -548,7 +551,7 @@ class DBConfigHandler:
                 return str(value)
                 
         except Exception as e:
-            print(f"An error occurred (get_parameter_value): {e}")
+            print(f"An error occurred (get_parameter_value): {e}", file=sys.stderr)
             return None
         finally:
             if conn:
@@ -562,7 +565,7 @@ class DBConfigHandler:
             cursor.execute('DELETE FROM challenge_response WHERE expiry < CURRENT_TIMESTAMP')
             conn.commit()
         except Exception as e:
-            print(f"An error occurred: {e}")
+            print(f"An error occurred: {e}", file=sys.stderr)
             return None   
         finally:
             if conn:
@@ -583,7 +586,7 @@ class DBConfigHandler:
             conn.commit()
             return response_uuid;
         except Exception as e:
-            print(f"An error occurred (generate_challenge_response): {e}")
+            print(f"An error occurred (generate_challenge_response): {e}", file=sys.stderr)
             return None   
         finally:
             if conn:
@@ -599,7 +602,7 @@ class DBConfigHandler:
                 result = cursor.fetchone()[0]
                 return result > 0
             except Exception as e:
-                print(f"An error occurred  (test_user_exists): {e}")
+                print(f"An error occurred  (test_user_exists): {e}", file=sys.stderr)
                 return False   
             finally:
                 if conn:
@@ -623,7 +626,7 @@ class DBConfigHandler:
             conn.commit()
             return result            
         except Exception as e:
-            print(f"An error occurred: {e}")
+            print(f"An error occurred: {e}", file=sys.stderr)
             return None   
         finally:
             if conn:
@@ -653,7 +656,7 @@ class DBConfigHandler:
             else:
                 return False  # Return False if the username doesn't exist           
         except Exception as e:
-            print(f"An error occurred (is_account_locked): {e}")
+            print(f"An error occurred (is_account_locked): {e}", file=sys.stderr)
             return None   
         finally:
             if conn:
@@ -686,7 +689,7 @@ class DBConfigHandler:
             if action=='lock' or action=='delete':
                 self.remove_all_user_sessions( username )
         except Exception as e:
-            print(f"An error occurred (lock_unlock_delete_account): {e}")
+            print(f"An error occurred (lock_unlock_delete_account): {e}", file=sys.stderr)
             return None   
         finally:
             if conn:
@@ -724,7 +727,7 @@ class DBConfigHandler:
                 result_obj.append( { 'username': user_data[0], 'permissions': user_data[1], 'disabled': user_data[2], 'active_sessions': user_data[3] } )
             return result_obj            
         except Exception as e:
-            print(f"An error occurred (list_all_username): {e}")
+            print(f"An error occurred (list_all_username): {e}", file=sys.stderr)
             return [ ]   
         finally:
             if conn:
@@ -743,7 +746,7 @@ class DBConfigHandler:
                 app_keys.append( result[0] )
             return app_keys
         except Exception as e:
-            print(f"An error occurred (list_all_app_keys): {e}")
+            print(f"An error occurred (list_all_app_keys): {e}", file=sys.stderr)
             return [ ]    
         finally:
             if conn:
@@ -766,7 +769,7 @@ class DBConfigHandler:
             else:
                 return None
         except Exception as e:
-            print(f"An error occurred: {e}")
+            print(f"An error occurred: {e}", file=sys.stderr)
             return None   
         finally:
             if conn:
@@ -793,7 +796,7 @@ class DBConfigHandler:
                 cursor.execute("UPDATE authentication SET disabled=TRUE WHERE bad_pass_attempts >= ? AND permissions != 'admin'", (max_bad_pass_attempts,))
             conn.commit()
         except Exception as e:
-            print(f"An error occurred (increment_reset_bad_pass): {e}")
+            print(f"An error occurred (increment_reset_bad_pass): {e}", file=sys.stderr)
             return False 
         finally:
             if conn:
@@ -827,7 +830,7 @@ class DBConfigHandler:
             self.insert_or_update_parameter( 'auth_state', 'string', 'authenticated' )
             return True      
         except Exception as e:
-            print(f"An error occurred (set_pass): {e}")
+            print(f"An error occurred (set_pass): {e}", file=sys.stderr)
             return False 
         finally:
             if conn:
@@ -855,7 +858,7 @@ class DBConfigHandler:
             conn.commit()
             return True      
         except Exception as e:
-            print(f"An error occurred (change_pass): {e}")
+            print(f"An error occurred (change_pass): {e}", file=sys.stderr)
             return False 
         finally:
             if conn:
@@ -913,7 +916,7 @@ class DBConfigHandler:
             conn.commit()
             return True          
         except Exception as e:
-            print(f"An error occurred (store_new_auth_token): {e}")
+            print(f"An error occurred (store_new_auth_token): {e}", file=sys.stderr)
             return False
         finally:
             if conn:
@@ -936,7 +939,7 @@ class DBConfigHandler:
             conn.commit()
             return True          
         except Exception as e:
-            print(f"An error occurred (remove_all_user_sessions): {e}")
+            print(f"An error occurred (remove_all_user_sessions): {e}", file=sys.stderr)
             return False
         finally:
             if conn:
@@ -955,7 +958,7 @@ class DBConfigHandler:
             conn.commit()
             return True          
         except Exception as e:
-            print(f"An error occurred (remove_specific_user_sessions): {e}")
+            print(f"An error occurred (remove_specific_user_sessions): {e}", file=sys.stderr)
             return False
         finally:
             if conn:
@@ -977,7 +980,7 @@ class DBConfigHandler:
             conn.commit()
             return True          
         except Exception as e:
-            print(f"An error occurred (remove_specific_user_sessions): {e}")
+            print(f"An error occurred (remove_specific_user_sessions): {e}", file=sys.stderr)
             return False
         finally:
             if conn:
@@ -994,7 +997,7 @@ class DBConfigHandler:
                 cursor.execute(insert_sql, (app_key, hex_sha512_secret ))
                 conn.commit()
             except Exception as e:
-                print(f"An error occurred (generate_app_key): {e}")
+                print(f"An error occurred (generate_app_key): {e}", file=sys.stderr)
             finally:
                 if conn:
                     conn.close()
@@ -1013,7 +1016,7 @@ class DBConfigHandler:
                 cursor.execute(delete_sql, (app_key, ))
                 conn.commit()
             except Exception as e:
-                print(f"An error occurred (delete_app_key): {e}")
+                print(f"An error occurred (delete_app_key): {e}", file=sys.stderr)
             finally:
                 if conn:
                     conn.close()
@@ -1026,7 +1029,7 @@ class DBConfigHandler:
                 results = cursor.fetchall( get_sql )
                 return results                
             except Exception as e:
-                print(f"An error occurred (get_app_keys): {e}")
+                print(f"An error occurred (get_app_keys): {e}", file=sys.stderr)
             finally:
                 if conn:
                     conn.close()
@@ -1058,7 +1061,7 @@ class DBConfigHandler:
             self.ip_black_list = ip_black_list
             return True
         except Exception as e:
-            print(f"An error occurred: {e}")
+            print(f"An error occurred: {e}", file=sys.stderr)
             if conn:
                 conn.rollback()
             return False
@@ -1098,7 +1101,8 @@ class DBConfigHandler:
                         'allowed_ips': list_of_allowed_ips,
                         'enforce_ip_whitelist': self.get_parameter_value('enforce_ip_whitelist'),
                         'usernames' : self.list_all_usernames(),
-                        'app_keys' : self.list_all_app_keys()
+                        'app_keys' : self.list_all_app_keys(),
+                        'image_rotation': self.get_parameter_value('image_rotation')
                    }
             
         return config_data
@@ -1120,6 +1124,13 @@ class DBConfigHandler:
             if not isinstance(config_object['allowed_ips']['blacklisted'], list):
                 return False
             if not isinstance(config_object['enforce_ip_whitelist'], bool):
+                return False
+                
+            if 'image_rotation' not in config_object:
+                return False
+            if not isinstance( config_object['image_rotation'], int ):
+                return False
+            if config_object['image_rotation'] > 270 or config_object['image_rotation'] < 0 or (config_object['image_rotation'] % 90) != 0:
                 return False
             
             normalised_whitelisted = []
@@ -1143,8 +1154,12 @@ class DBConfigHandler:
     # Assumes validated input (use validate_config_object)
     def set_config( self, config_object ):
           self.set_ip_allow_list( config_object['allowed_ips']['whitelisted'], config_object['allowed_ips']['blacklisted'] )
+          
           self.insert_or_update_parameter( 'enforce_ip_whitelist', 'bool', config_object['enforce_ip_whitelist'] )
           self.enforce_ip_whitelist = config_object['enforce_ip_whitelist']
+          
+          self.insert_or_update_parameter( 'image_rotation', 'int', config_object['image_rotation'] )
+          
     
     def validate_appkey_auth( self, appkey, secret ):
         try:                    
@@ -1169,7 +1184,7 @@ class DBConfigHandler:
             return False
             
         except Exception as e:
-            print(f"An error occurred (validate_appkey_auth): {e}")
+            print(f"An error occurred (validate_appkey_auth): {e}", file=sys.stderr)
             return False
         finally:
             if conn:
@@ -1215,7 +1230,7 @@ class DBConfigHandler:
                         
             return (False, None)
         except Exception as e:
-            print(f"An error occurred: {e}")
+            print(f"An error occurred: {e}", file=sys.stderr)
             return (False, None)
         finally:
             if conn:
@@ -1251,7 +1266,7 @@ class DBConfigHandler:
                 return False  # Item does not exist
 
         except Exception as e:
-            print(f"An error occurred (validate_challege): {e}")
+            print(f"An error occurred (validate_challege): {e}", file=sys.stderr)
             return None
         finally:
             if conn:
