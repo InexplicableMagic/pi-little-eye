@@ -1,0 +1,170 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    height: 100vh;
+    background-color: #f0f0f0;
+    overflow-x: hidden; /* Prevent horizontal scrolling */
+}
+
+
+/* Container for the left-hand configuation window (produced by clicking the hamburger menu) */
+#configuration-window {
+    background-color: #f3f3f3;
+    display: none;
+    position: fixed; /* Changed from absolute to fixed */
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 90%; /* Set default width to 90% */
+    max-width: 800px; /* Maximum width for larger screens */
+    padding: 10px;
+    box-sizing: border-box; /* Include padding in width calculation */
+    box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+    z-index: 1000;
+    overflow-y: auto;
+    border-right: 2px solid grey;
+}
+
+#configuration-window .configuaration-section-container {
+    display: flex;
+    flex-direction: column;
+    gap: 10px; /* Space between sections */
+}
+
+#configuration-window .configuration-section {
+    background-color: white;
+    border-radius: 15px; /* Rounded corners */
+    padding: 10px; /* Optional: Add some padding inside the sections */
+}
+
+#configuration-window h2 {
+    margin-top: 0;
+}
+
+#configuration-window button {
+    margin-top: 10px;
+    padding: 10px 20px;
+    height: 40px;
+    background-color: #333;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+#configuration-window button:disabled {
+    opacity: 0.5;  /* Makes the button semi-transparent */
+    cursor: not-allowed;  /* Changes the cursor to indicate it's not clickable */
+    background-color: #ccc;  /* Changes the background color */
+    color: #666;  /* Changes the text color */
+    border-color: #999;  /* Changes the border color */
+}
+
+.status-icon {
+    height: 40px;
+    margin-top: 10px;
+}
+
+#configuration-window button:hover {
+    background-color: #555;
+}
+
+#configuration-window .config-panel-selector-button {
+    background: none;
+}
+
+#configuration-window .config-panel-selector-button:hover {
+    background: none;
+}
+
+
+#configuration-window .config-panel-icon-image {
+    width: 50px;
+    height: 50px;
+}
+
+#set-initial-admin-password-window {
+    display: none;
+}
+
+
+/* Message window displayed prior to the login screen when initially contacting the camera */
+#message-window {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+    text-align: center;
+}
+
+/* Style of the message that displays when initially contacting the camera */
+.initial-message-class {
+    font-size: 2em; /* Adjust the size as needed */
+    font-weight: bold;
+}
+
+/* Area where the video is displayed */
+#main-window {
+    display: none;
+    text-align: center;
+}
+
+/* Window asking for the initial password when the software is first booted */
+#set-initial-admim-password-window {
+    display: none;
+}
+
+/* Window asking the user to login prior to display of video */
+#login-window {
+    display: none;
+}
+
+/* Styling for one panel of the config settings */
+.config-panel {
+     display: none;
+}
+
+/* Styling that produces the 3 bar hamburger menu icon */
+.hamburger-menu-class {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    width: 30px;
+    height: 24px;
+    cursor: pointer;
+    position: absolute;
+    top: 20px;
+    left: 20px;
+}
+
+/* A single bar from the hamburger icon */
+.bar {
+    width: 100%;
+    height: 4px;
+    background-color: #333;
+    border-radius: 2px;
+}
+
+/* Display all the HTML elements in a columnar list */
+.vertical-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px; /* Adjust the gap as needed */
+    width: fit-content;
+}
+
+/* When in a vertical-list, display specific elements side by side*/
+.side-by-side {
+        display: flex;
+        gap: 10px; /* Space between the button and image */
+        align-items: center; /* Vertically center the items */
+}
+
+.status-icon {
+    display: none;
+}
+
+.password-field {
+    width: 200px;
+}

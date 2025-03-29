@@ -50,7 +50,7 @@ class CameraHandler:
             with self.option_change_lock:
                frame = CameraHandler.rotate_image( frame, self.image_rotation_degrees )
                frame = CameraHandler.add_timestamp(frame)
-            ret, buffer = cv2.imencode('.jpg', frame)
+            ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 50] )
             frame = buffer.tobytes()
             with self.frame_publish_lock:
                 self.last_frame = frame

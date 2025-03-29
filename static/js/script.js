@@ -19,19 +19,39 @@ function verifyCookiesEnabled() {
     if (navigator.cookieEnabled) return true;
 }
 
-function checkPasswords( pass1ID, pass2ID, messageID, buttonID ) {
+function checkPasswordsMatch( pass1ID, pass2ID, messageID, buttonID, originalPassfield = null ) {
     const message = document.getElementById(messageID);
     const set_password1 = document.getElementById(pass1ID);
     const set_password2 = document.getElementById(pass2ID);
-    const setPasswordButton = document.getElementById(buttonID); 
-    if (set_password1.value === set_password2.value && set_password1.value !== '') {
-        message.textContent = "Passwords match";
-        message.style.color = "green";
-        setPasswordButton.disabled = false;
-    } else {
-        message.textContent = "Passwords do not match or are empty";
-        message.style.color = "red";
-        setPasswordButton.disabled = true;
+    const setPasswordButton = document.getElementById(buttonID);
+    const originalPassButton = document.getElementById(originalPassfield);
+    
+    message.textContent = '';
+    setPasswordButton.disabled = true;
+   
+    if(set_password1.value != '' && set_password2.value != ''){
+        if (set_password1.value != set_password2.value ) {
+            message.textContent = "Passwords don't match";
+            message.style.color = 'red';
+        }else{
+            message.textContent = '';
+            
+            if( originalPassfield == null ){
+                setPasswordButton.disabled = true;
+            }else{
+                
+                if( originalPassButton.value === set_password1.value ){
+                    message.textContent = "New pass same as original";
+                    message.style.color = 'red';
+                }else{
+                    if( originalPassButton.value != '' && (originalPassButton.value != set_password1.value ) ){
+                        message.textContent = '';
+                        setPasswordButton.disabled = false;
+                    }                
+                }
+            }
+            
+        }
     }
 }
 
@@ -153,6 +173,7 @@ function logout( whichUser = null ){
       console.log(response)
       throw new Error('Network error returned from logout');
     }
+    setWindowVisibilityState();
     return response.json();
   });
 }
@@ -335,6 +356,7 @@ function setInitialPassword(username, password) {
   }).then(result => {
     if( result && result.error == false ){
         console.log("Password set.")
+        setWindowVisibilityState();
     }else{
         console.log("Password set error:"+result.message)
     }
@@ -346,51 +368,36 @@ function setInitialPassword(username, password) {
 
 
 function changeCurrentUserPassword(original_password, new_password) {
+  const statusIcon = document.getElementById('password-change-status-icon');
+  const changePassButton = document.getElementById('change-user-pass-button');
+  const passChangeInfoSpan = document.getElementById('password-change-info');
+  changePassButton.disabled = true;
+  
+  passChangeInfoSpan.textContent = ""
+  
   getChallenge()
   .then(challenge => {    
     return setPass(null, new_password, challenge, original_password);
   }).then(result => {
+    changePassButton.disabled = false;
     if( result && result.error == false ){
         console.log("Password set.")
+        elementVisibleOnTimer( statusIcon )
     }else{
-        console.log("Password set error:"+result.message)
+        passChangeInfoSpan.textContent = "Error:"+result.message;
     }
   })
   .catch(error => {
     console.error('Error:', error);
+    changePassButton.disabled = false;
   });
-}
-
-
-function get_auth_state(){
-
-    getChallenge()
-    .then(challenge => {
-        const data = {
-            challenge: challenge
-        };
-        return fetch(testAuthStateURL, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(data)
-        })
-        .then(response => {
-            
-            console.log( response )
-            
-        }).catch(error => {
-            message.textContent = `Network error on trying to login: ${error.message}`
-        });
-     }).catch(error => {
-        message.textContent = `Failure during contacting camera: ${error.message}`
-    });
-        
 }
 
 function login( username, password ){
     const message = document.getElementById('loginMessage');
+    const loginPasswordText = document.getElementById('loginPassword');
+    const loginUsernameText = document.getElementById('loginUsername');
+    loginPasswordText.value = '';
     getChallenge()
     .then(challenge => {
         const data = {
@@ -409,11 +416,14 @@ function login( username, password ){
             return response.json().then(jsonData => {
                 if (response.ok) {
                     if( jsonData.pass_OK === true ){
+                        loginUsernameText.value = '';
                         console.log("Login successful");
                         message.textContent = "";
+                        setWindowVisibilityState();
                     }
                 } else {
                     if( jsonData.pass_OK === false ){
+                        loginPasswordText.value = '';
                         message.textContent = "Incorrect password or username.";
                     }else{
                         message.textContent = `Error ${jsonData.message}`;
@@ -669,7 +679,7 @@ function addLogsToUI( before_id= null){
     .then( response_data => {
         if( response_data && response_data.error == false ){
             table = convertLogDataToHTMLTable( response_data.logs )
-            const targetDiv = document.getElementById('logs-div');
+            const targetDiv = document.getElementById('logs-panel');
             targetDiv.innerHTML = '';
             targetDiv.appendChild(table);
             //Whether to generate a "next" button
@@ -756,22 +766,39 @@ function addEventListeners() {
 	const setInitialPassword1 = document.getElementById('setInitialPasswordText1');
 	const setInitialPassword2 = document.getElementById('setInitialPasswordText2');
 	
-	const changePasswordOriginal = document.getElementById('changeOriginalText');
-	const changePasswordPassword1 = document.getElementById('changePassText1');
-	const changePasswordPassword2 = document.getElementById('changePassText2');
+	const changePasswordOriginal = document.getElementById('change-password-original-pass-field');
+	const changePasswordPassword1 = document.getElementById('change-password-newpass-field');
+	const changePasswordPassword2 = document.getElementById('change-password-verify-field');
 	const changeUserPassButton = document.getElementById('change-user-pass-button');
+	
+	
 	
 	const setPasswordButton = document.getElementById('setInitialPassButton');
 	const loginUsername = document.getElementById('loginUsername');
 	const loginPassword = document.getElementById('loginPassword');
 	const loginButton = document.getElementById('loginButton');
 	
-	setInitialPassword1.addEventListener('input', () => checkPasswords('setInitialPasswordText1', 'setInitialPasswordText2', 'setInitialPassMessage', 'setInitialPassButton') );
-	setInitialPassword2.addEventListener('input', () => checkPasswords('setInitialPasswordText1', 'setInitialPasswordText2', 'setInitialPassMessage', 'setInitialPassButton') );
+	setInitialPassword1.addEventListener('input', () => checkPasswordsMatch('setInitialPasswordText1', 'setInitialPasswordText2', 'setInitialPassMessage', 'setInitialPassButton') );
+	setInitialPassword2.addEventListener('input', () => checkPasswordsMatch('setInitialPasswordText1', 'setInitialPasswordText2', 'setInitialPassMessage', 'setInitialPassButton') );
+	
+    changePasswordPassword1.addEventListener('input', () => checkPasswordsMatch('change-password-newpass-field', 'change-password-verify-field', 'password-change-info', 'change-user-pass-button', originalPassfield='change-password-original-pass-field' ) );
+    changePasswordPassword2.addEventListener('input', () => checkPasswordsMatch('change-password-newpass-field', 'change-password-verify-field', 'password-change-info', 'change-user-pass-button', originalPassfield='change-password-original-pass-field' ) );
+	changePasswordOriginal.addEventListener('input', () => checkPasswordsMatch('change-password-newpass-field', 'change-password-verify-field', 'password-change-info', 'change-user-pass-button', originalPassfield='change-password-original-pass-field' ) );
+	
+	
 	setPasswordButton.addEventListener('click', () => setInitialPassword(setInitialUsername.value, setInitialPassword1.value));
 	loginButton.addEventListener('click', () => login(loginUsername.value, loginPassword.value));
     changeUserPassButton.addEventListener('click', () => changeCurrentUserPassword( changePasswordOriginal.value, changePasswordPassword1.value ) );
-      
+    
+    /* Hamburger config menu handler */
+    document.getElementById('hamburger-menu').addEventListener('click', function() {
+        document.getElementById('configuration-window').style.display = 'block';
+    });
+
+    document.getElementById('close-config').addEventListener('click', function() {
+        document.getElementById('configuration-window').style.display = 'none';
+    });
+    
     document.addEventListener('DOMContentLoaded', function() {
         setupTextAreaValidation('allowed-ip-list');
     });
@@ -792,9 +819,9 @@ function addEventListeners() {
 function restartVideoFeed() {                
         // Create an img element
         const img = document.createElement('img');
-        
-        // Set the src attribute to the URL with the challenge parameter
-        img.src = videoURL;
+        // Even though anti-caching headers are set, it still caches sometimes
+        // This tries to force no caching by changing the URL
+        img.src = videoURL+'?nocache=' + new Date().getTime();
         img.id = "video-feed"
         
         // Append the img element to the video container
@@ -803,7 +830,7 @@ function restartVideoFeed() {
         if(vfIMGElement){
             vfIMGElement.remove()
         }
-        
+
         videoContainer.appendChild(img);
         
         // Add an error handler for the image
@@ -811,4 +838,134 @@ function restartVideoFeed() {
             console.error('Failed to load the video stream');
         };
 }
+
+function get_auth_state(){
+
+    return getChallenge()
+    .then(challenge => {
+        const data = {
+            challenge: challenge
+        };
+        return fetch(testAuthStateURL, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(data)
+        })
+        .then(response => {
+            if (response.ok) {
+                     return response.json();
+            }else{
+                console.log("Error getting auth state");
+            }
+            
+        }).catch(error => {
+            message.textContent = `Network error on trying to login: ${error.message}`
+        });
+     }).catch(error => {
+        message.textContent = `Failure during contacting camera: ${error.message}`
+    });
+        
+}
+
+function setInitialWindowMessageText( msg ){
+    var initialMessage = document.getElementById("initial-message");
+    initialMessage.textContent = msg;
+}
+
+function elementVisibleOnTimer(imageElement, visibleTime=3000) {
+    imageElement.style.display = 'initial';
+
+    setTimeout(function() {
+        imageElement.style.display = 'none';
+    }, visibleTime);
+}
+
+// Set which window is visible to the user based on the result of the "test-auth-state" REST method call
+// e.g. whether the video should be displayed or whether the user needs to login first
+function setWindowVisibilityState() {
+    const initialMessageWindowDiv = document.getElementById('message-window');
+    const initialAdminPassWindowDiv = document.getElementById('set-initial-admin-password-window');
+    const loginWindowDiv = document.getElementById('login-window');
+    const mainWindowDiv = document.getElementById('main-window');
+    const configWindowDiv = document.getElementById('configuration-window');
+    
+    setInitialWindowMessageText( "Contacting camera ..." )
+
+    get_auth_state()
+    .then( auth_state => {
+        console.log( auth_state )
+    
+        if(auth_state.auth_state === 'set_initial_password'){
+            initialMessageWindowDiv.style.display = 'none';
+            initialAdminPassWindowDiv.style.display = 'block';
+            loginWindowDiv.style.display = 'none';
+            mainWindowDiv.style.display = 'none';
+            configWindowDiv.style.display = 'none';
+        }
+        
+        if(auth_state.auth_state === 'login_required'){
+            initialMessageWindowDiv.style.display = 'none';
+            initialAdminPassWindowDiv.style.display = 'none';
+            loginWindowDiv.style.display = 'block';
+            mainWindowDiv.style.display = 'none';
+            configWindowDiv.style.display = 'none';
+        }
+        
+        if(auth_state.auth_state === 'authenticated'){
+            initialMessageWindowDiv.style.display = 'none';
+            initialAdminPassWindowDiv.style.display = 'none';
+            loginWindowDiv.style.display = 'none';
+            mainWindowDiv.style.display = 'block';
+            configWindowDiv.style.display = 'none';
+            
+            const standardConfigWindowDiv = document.getElementById('standard-config-panel');
+            const securityConfigWindowDiv = document.getElementById('security-panel');
+            const cameraConfigWindowDiv = document.getElementById('camera-config-panel');
+            const logsWindowDiv = document.getElementById('logs-panel');
+            const userManagementDiv = document.getElementById('user-management-panel');
+            
+            const addUserSectionDiv = document.getElementById('user-management-section');
+            const appKeySectionDiv = document.getElementById('app-key-management-section');
+            
+            console.log( auth_state.permissions )
+            
+            if(auth_state.permissions === 'admin'){
+                // Enable all config options if the user is an admin
+                securityConfigWindowDiv.style.display = 'none';
+                cameraConfigWindowDiv.style.display = 'none';
+                logsWindowDiv.style.display = 'none';
+                
+                userManagementDiv.style.display = 'block';
+                addUserSectionDiv.style.display = 'block';
+                appKeySectionDiv.style.display = 'block';
+            }else{
+                // Hide unavailable config options if the user does not have permissions
+                securityConfigWindowDiv.style.display = 'none';
+                cameraConfigWindowDiv.style.display = 'none';
+                logsWindowDiv.style.display = 'none';
+                
+                userManagementDiv.style.display = 'block';
+                addUserSectionDiv.style.display = 'none';
+                appKeySectionDiv.style.display = 'none';
+                
+            }
+            
+            resetConfigOnUI();
+            addLogsToUI();
+            restartVideoFeed();
+        }
+        
+        if(auth_state.auth_state === 'access_denied'){
+            setInitialWindowMessageText( "Access Denied" )
+            initialAdminPassWindowDiv.style.display = 'none';
+            loginWindowDiv.style.display = 'none';
+            mainWindowDiv.style.display = 'none';
+            configWindowDiv.style.display = 'none';
+            initialMessageWindowDiv.style.display = 'flex';
+        }
+    });
+}
+
 

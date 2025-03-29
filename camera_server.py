@@ -126,7 +126,7 @@ def video_mjpeg():
 
 @app.route('/api/v1/test-auth-state', methods=['POST'])
 @nocache
-def auth_state():
+def test_auth_state():
     response = make_response( jsonify(  { 'error': True, 'message': 'unknown error' } ), 500 )
     
     if dbch.is_ip_list_allowed( get_list_of_possible_client_ips() ):
@@ -142,19 +142,20 @@ def auth_state():
                 if authenticated:
                     user_permissions = dbch.get_user_permissions( username )
                     if user_permissions:
-                        response = make_response( jsonify(  { 'auth-state': 'authenticated', 'permissions': user_permissions } ), 200 )
+                        response = make_response( jsonify(  { 'auth_state': 'authenticated', 'permissions': user_permissions } ), 200 )
                     else:
                         response = make_response( jsonify(  { 'error': True, 'message': 'Failure getting permissions for user' } ), 500 )
                 elif dbch.is_app_in_unathenticated_state():            
-                    response = make_response( jsonify(  { 'auth-state': 'set_initial_password' } ), 200 )
+                    response = make_response( jsonify(  { 'auth_state': 'set_initial_password' } ), 200 )
                 else:
-                    response = make_response( jsonify(  { 'auth-state': 'login_required' } ), 200 )
+                    response = make_response( jsonify(  { 'auth_state': 'login_required' } ), 200 )
                     response.delete_cookie('session_id')
                     response.delete_cookie('auth_token')
             else:
                 response = make_response( jsonify ( { 'error': True, 'message': 'Challenge parameter not set in POST data.' } ), 400 )
     else:
-         response = make_response( jsonify( {'auth-state': 'ip_banned'} ), 200 )
+        # IP Blocked   
+        response = make_response( jsonify( {'auth-state': 'access_denied'} ), 200 )
 
     return response
 
