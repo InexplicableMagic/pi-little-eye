@@ -439,7 +439,7 @@ def set_pass():
                                             response = make_response( jsonify( { 'error': False, 'message': 'Password changed.' } ), 200 )
                                             log_entry( 'info', 'password_set', f"Changed password", username=username_authenticated )
                                         else:
-                                            response = make_response( jsonify ( { 'error': True, 'message': 'Failed to verify original password', 'err_type': 'oiginal_pass_failure' } ), 401 )
+                                            response = make_response( jsonify ( { 'error': True, 'message': 'Original password incorrect', 'err_type': 'oiginal_pass_failure' } ), 401 )
                                             log_entry( 'warning', 'password_failure', f"Tried to change password but entered incorrect original password", username=username_authenticated, alert=True )
                                     else:
                                         response = make_response( jsonify ( { 'error': True, 'message': 'Original password not set', 'err_type': 'pass_not_set' } ), 400 )

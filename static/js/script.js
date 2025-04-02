@@ -37,7 +37,7 @@ function checkPasswordsMatch( pass1ID, pass2ID, messageID, buttonID, originalPas
             message.textContent = '';
             
             if( originalPassfield == null ){
-                setPasswordButton.disabled = true;
+                setPasswordButton.disabled = false;
             }else{
                 
                 if( originalPassButton.value === set_password1.value ){
@@ -55,17 +55,32 @@ function checkPasswordsMatch( pass1ID, pass2ID, messageID, buttonID, originalPas
     }
 }
 
+function checkUserPassFilledIn( userID, passID, addButtonID ){
+    const userField = document.getElementById(userID);
+    const passField = document.getElementById(passID);
+    const addButton = document.getElementById(addButtonID);
+    
+    addButton.disabled = true;
+    if(userField.value != '' && passField.value != ''){
+        addButton.disabled = false;
+    }
+}
+
 function addNewUser(){
-    const new_user_name = document.getElementById('new-username');
-    const new_user_pass = document.getElementById('new-user-password');
+    const new_user_name = document.getElementById('new-username-field');
+    const new_user_pass = document.getElementById('new-user-password-field');
+    const addNewUserInfo = document.getElementById('add-new-user-info');
+    addNewUserInfo.textContent = '';
     getChallenge()
     .then(challenge => {    
         return setPass(new_user_name.value, new_user_pass.value, challenge);
     }).then(result => {
         if( result && result.error == false ){
             console.log("New user added.")
+            resetConfigOnUI();
         }else{
             console.log("Error on adding user:"+result.message)
+            addNewUserInfo.textContent = result.message;
         }
     })
   .catch(error => {
@@ -122,8 +137,6 @@ function deleteAppKey(app_key) {
 
 }
 
-
-
 function setPass(username, password, challenge, orignalPassword = null) {
   
   const data = {
@@ -148,10 +161,6 @@ function setPass(username, password, challenge, orignalPassword = null) {
     body: JSON.stringify(data)
   })
   .then(response => {
-    if (!response.ok) {
-      console.log(response)
-      throw new Error('Network error returned from set_pass');
-    }
     return response.json();
   });
 
@@ -367,13 +376,22 @@ function setInitialPassword(username, password) {
 }
 
 
-function changeCurrentUserPassword(original_password, new_password) {
+function changeCurrentUserPassword(  ) {
   const statusIcon = document.getElementById('password-change-status-icon');
   const changePassButton = document.getElementById('change-user-pass-button');
   const passChangeInfoSpan = document.getElementById('password-change-info');
-  changePassButton.disabled = true;
+  const password1Field = document.getElementById('change-password-newpass-field');
+  const password2Field = document.getElementById('change-password-verify-field');
+  const changePassOriginalField = document.getElementById('change-password-original-pass-field');
   
-  passChangeInfoSpan.textContent = ""
+  original_password = changePassOriginalField.value;
+  new_password = password1Field.value;
+  
+  changePassButton.disabled = true;
+  passChangeInfoSpan.textContent = "";
+  password1Field.value = '';
+  password2Field.value = '';
+  changePassOriginalField.value = '';
   
   getChallenge()
   .then(challenge => {    
@@ -389,7 +407,6 @@ function changeCurrentUserPassword(original_password, new_password) {
   })
   .catch(error => {
     console.error('Error:', error);
-    changePassButton.disabled = false;
   });
 }
 
@@ -771,24 +788,30 @@ function addEventListeners() {
 	const changePasswordPassword2 = document.getElementById('change-password-verify-field');
 	const changeUserPassButton = document.getElementById('change-user-pass-button');
 	
-	
+	const addNewUserField = document.getElementById('new-username-field');
+    const addNewUserPassField = document.getElementById('new-user-password-field');
 	
 	const setPasswordButton = document.getElementById('setInitialPassButton');
 	const loginUsername = document.getElementById('loginUsername');
 	const loginPassword = document.getElementById('loginPassword');
 	const loginButton = document.getElementById('loginButton');
 	
+	//Enable button and provide feedback on filling in the initial admin password
 	setInitialPassword1.addEventListener('input', () => checkPasswordsMatch('setInitialPasswordText1', 'setInitialPasswordText2', 'setInitialPassMessage', 'setInitialPassButton') );
 	setInitialPassword2.addEventListener('input', () => checkPasswordsMatch('setInitialPasswordText1', 'setInitialPasswordText2', 'setInitialPassMessage', 'setInitialPassButton') );
 	
+	//Enable button and provide feedback when changing own user password in the config
     changePasswordPassword1.addEventListener('input', () => checkPasswordsMatch('change-password-newpass-field', 'change-password-verify-field', 'password-change-info', 'change-user-pass-button', originalPassfield='change-password-original-pass-field' ) );
     changePasswordPassword2.addEventListener('input', () => checkPasswordsMatch('change-password-newpass-field', 'change-password-verify-field', 'password-change-info', 'change-user-pass-button', originalPassfield='change-password-original-pass-field' ) );
 	changePasswordOriginal.addEventListener('input', () => checkPasswordsMatch('change-password-newpass-field', 'change-password-verify-field', 'password-change-info', 'change-user-pass-button', originalPassfield='change-password-original-pass-field' ) );
 	
+	//Enable button and provide feedback when adding a new user account in the config
+	addNewUserField.addEventListener('input', () => checkUserPassFilledIn( 'new-username-field', 'new-user-password-field', 'add-new-user-button' ) );
+	addNewUserPassField.addEventListener('input', () => checkUserPassFilledIn( 'new-username-field', 'new-user-password-field', 'add-new-user-button' ) );
 	
 	setPasswordButton.addEventListener('click', () => setInitialPassword(setInitialUsername.value, setInitialPassword1.value));
 	loginButton.addEventListener('click', () => login(loginUsername.value, loginPassword.value));
-    changeUserPassButton.addEventListener('click', () => changeCurrentUserPassword( changePasswordOriginal.value, changePasswordPassword1.value ) );
+    changeUserPassButton.addEventListener('click', () => changeCurrentUserPassword(  ) );
     
     /* Hamburger config menu handler */
     document.getElementById('hamburger-menu').addEventListener('click', function() {
@@ -804,7 +827,8 @@ function addEventListeners() {
     });
 
     //Attempt to start the video feed if the video DIV is visible
-    //Restart the video if the page becomes visible (e.g. user clicks the back button)	
+    //Restart the video on change in session history e.g. user clicks the back button
+    //after being on another page
 	window.addEventListener('pageshow', function(event) {
     if (document.visibilityState === 'visible') {
             console.log("restart video")
@@ -814,6 +838,28 @@ function addEventListeners() {
             }
       }
     });
+    
+    // Restart the video if the page becomes visible after previously being hidden
+    document.addEventListener('visibilitychange', function() {
+            if (document.visibilityState === 'visible') {
+                console.log("restart video"+ new Date().getTime())
+                const div = document.getElementById('video-container');
+                if (div.style.display !== 'none'){
+                    restartVideoFeed()
+                }
+            }else{
+                // Drop the video image if the page becomes invisible to save bandwidth
+                const videoImg = document.getElementById('video-feed');
+                if( videoImg ){
+                    // Need to set the video src to blank to disconnect the video
+                    // Removing the video element is not sufficient. It keeps downloading
+                    // in the backgroud
+                    videoImg.src=""
+                    videoImg.remove()
+                    console.log("video dropped:"+ new Date().getTime())
+                }
+            }
+     });
 }
 
 function restartVideoFeed() {                
@@ -833,12 +879,9 @@ function restartVideoFeed() {
 
         videoContainer.appendChild(img);
         
-        // Add an error handler for the image
-        img.onerror = () => {
-            console.error('Failed to load the video stream');
-        };
 }
 
+// Determine if the user is authenticated - used to choose which window to display
 function get_auth_state(){
 
     return getChallenge()
@@ -869,11 +912,13 @@ function get_auth_state(){
         
 }
 
+// Set the message on the screen displayed prior to first connecting to the camera
 function setInitialWindowMessageText( msg ){
     var initialMessage = document.getElementById("initial-message");
     initialMessage.textContent = msg;
 }
 
+// Display an element for a specific period of time then make it invisible
 function elementVisibleOnTimer(imageElement, visibleTime=3000) {
     imageElement.style.display = 'initial';
 

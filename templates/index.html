@@ -28,13 +28,16 @@
     </div>
     
     <div id="main-window">
-        <div id="hamburger-menu" class="hamburger-menu-class">
-            <div class="bar"></div><div class="bar"></div><div class="bar"></div>
+        <div id="nav-bar">
+            <div id="hamburger-menu" class="hamburger-menu-class">
+                <div class="bar"></div><div class="bar"></div><div class="bar"></div>
+            </div>
+            <div id="middle-text">Middle</div> 
+            <button onclick="logout();" id="logout-button">Logout</button>
         </div>
         <div id="video-container">
             
         </div>
-        <button onclick="logout();" id="logout-button">Logout</button>
     </div>
     
     <div id="configuration-window">
@@ -57,35 +60,40 @@
         
         <div id="user-management-panel" class="config-panel">
             <div class="configuaration-section-container">
+                <div id="user-management-section" class="configuration-section" >
+                    <span>Manage Camera Users</span>
+                    <div id="user-list-table">
+                    </div>
+                    <div class="vertical-list">
+                        <input id="new-username-field" placeholder="new username">
+                        <input id="new-user-password-field" type="password" placeholder="initial password">
+                        <button id="add-new-user-button" onclick="addNewUser()" disabled >Add User</button>
+                        <span id="add-new-user-info"></span>
+                    </div>  
+                </div>
+                <div id="app-key-management-section" class="configuration-section" >
+                    <span>Manage Application Keys</span>
+                    <div id="app-key-list-table">
+                    </div>
+                    <button id="generate-app-key-button" onclick="generate_appkey()" >New App Key</button>
+                    <span id="appkey-display-span"></span>
+                </div>
                 <div id="change-user-password-section" class="configuration-section" >
-                    <p>Change current user password:</p>
+                    <span>Change Current User Password</span>
                     <div class="vertical-list">
                         <label for="changeOriginalText">Current password:</label>
                         <input class="password-field" type="password" id="change-password-original-pass-field" placeholder="Current password">
                         <label for="changePassText1">New password:</label>
                         <input class="password-field" type="password" id="change-password-newpass-field" placeholder="New password">
                         <input class="password-field" type="password" id="change-password-verify-field" placeholder="Confirm new password">
-                        <span id="password-change-info"></span>
                         <div class="side-by-side">
                             <button disabled id="change-user-pass-button">Change Password</button>
                             <img id="password-change-status-icon" class="status-icon" src="static/icons/green-tick.svg" alt="Operation status icon">
                         </div>
+                        <span id="password-change-info"></span>
                     </div>
-                </div>
-                <div id="user-management-section" class="configuration-section" >
-                    <div id="user-list-table">
-                    </div>
-                    <input id="new-username" placeholder="new username">
-                    <input type="password" id="new-user-password" placeholder="initial password">
-                    <button id="add-new-user" onclick="addNewUser()" >Add User</button>    
-                </div>
-                <div id="app-key-management-section" class="configuration-section" >
-                    <div id="app-key-list-table">
-                    </div>
-                    <button id="generate-app-key-button" onclick="generate_appkey()" >New App Key</button>
-                    <span id="appkey-display-span"></span>
-                </div>   
-            </div>     
+                </div> 
+            </div>
         </div>
         
         </div>
