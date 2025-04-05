@@ -249,6 +249,10 @@ function resetConfigOnUI(){
             }
             const rotationSelect = document.getElementById('camera-rotation-select');
             rotationSelect.value = config.image_rotation;
+            
+            const timeStampScaleSelect = document.getElementById('timestamp-text-size');
+            timeStampScaleSelect.value = config.timestamp_scale
+            
             generateUserListTable( config.usernames, config.current_username, 'user-list-table' );
             generateAppKeyTable( config.app_keys, 'app-key-list-table' );
             populateSelectWithResolutions( 'camera-resolutions-select', config.available_camera_resolutions, config.current_camera_resolution );
@@ -293,6 +297,7 @@ function setupTextAreaValidation(textAreaId) {
 function convertConfigUIStateToJSON(){
     const ipTextArea = document.getElementById('allowed-ip-list');
     const rotationSelect = document.getElementById('camera-rotation-select');
+    const timeStampScaleSelect = document.getElementById('timestamp-text-size');
     allowed_ip_listing_array = convertStringListToArray( ipTextArea.value )
     if( validateIPArray( allowed_ip_listing_array ) ){
         enforce_whitelisted_ips = true
@@ -306,7 +311,8 @@ function convertConfigUIStateToJSON(){
                },
                enforce_ip_whitelist: enforce_whitelisted_ips,
                selected_resolution: getSelectedResolution( 'camera-resolutions-select' ),
-               image_rotation: Number(rotationSelect.value)
+               image_rotation: Number(rotationSelect.value),
+               timestamp_scale: timeStampScaleSelect.value
         };
         return postObject;
         

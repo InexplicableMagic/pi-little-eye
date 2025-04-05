@@ -206,11 +206,11 @@ def get_config():
         return make_response( jsonify ( { 'error': True, 'message': message } ), http_code )
     else:
         current_user_permissions = dbch.get_user_permissions( username )
+        # Add config that comes from the database settings
         config = dbch.get_all_config( current_user_permissions )
+        #Add config based on the current camera state
+        config = ch.append_camera_current_config( config )
         config['current_username'] = username
-        config['available_camera_resolutions'] = ch.get_camera_resolutions()
-        config['current_camera_resolution'] = ch.get_camera_current_resolutions()
-        config['is_camera_available'] = ch.is_camera_detected()
         return make_response( jsonify ( config ), 200 )
         
     return response

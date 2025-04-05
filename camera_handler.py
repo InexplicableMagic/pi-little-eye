@@ -23,6 +23,7 @@ class CameraHandler:
         self.selected_camera_number = config.get_parameter_value( 'cam_number' )
         self.user_selected_res = ( config.get_parameter_value( 'cam_res_width' ), config.get_parameter_value( 'cam_res_height' ) )
         self.image_rotation_degrees = self.config.get_parameter_value( 'image_rotation' )
+        (scale_name, self.timestamp_scale_factor) = CameraHandler.scale_name_to_scale_value( self.config.get_parameter_value( 'timestamp_scale_factor' ) )
         self.camera_state_change_lock = threading.Lock()
         self.frame_publish_lock = threading.Lock()
         self.option_change_lock = threading.Lock()
@@ -40,6 +41,7 @@ class CameraHandler:
             self.available_resolutions = resolutions
             self.current_resolution = CameraHandler.__suggest_camera_resolution( resolutions, self.user_selected_res )
             self.camera_detected = True
+        self.recalculate_timestamp_text_position()
 
     def publish_image(self):
         with self.frame_publish_lock:
@@ -49,7 +51,7 @@ class CameraHandler:
             frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2RGB)  # Convert XRGB to RGB
             with self.option_change_lock:
                frame = CameraHandler.rotate_image( frame, self.image_rotation_degrees )
-               frame = CameraHandler.add_timestamp(frame)
+               frame = self.add_timestamp(frame)
             ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 50] )
             frame = buffer.tobytes()
             with self.frame_publish_lock:
@@ -73,6 +75,26 @@ class CameraHandler:
             if (rotation <= 270) and ((rotation % 90) == 0):
                 with self.option_change_lock:
                     self.image_rotation_degrees = rotation
+                self.recalculate_timestamp_text_position()
+
+    def scale_name_to_scale_value( scale_name ):
+        new_scaling = float( 1.0 )
+        if scale_name == 'small':
+            new_scaling = 0.5
+        elif scale_name == 'large':
+            new_scaling = 1.5
+        else:
+            scale_name = 'medium'
+            new_scaling = 1.0
+        
+        return (scale_name, new_scaling)
+                    
+    def set_new_timestamp_scale( self, scale_name ):
+        (scale_name, new_scaling) = CameraHandler.scale_name_to_scale_value( scale_name )
+        with self.option_change_lock:
+            self.timestamp_scale_factor = new_scaling
+        self.config.insert_or_update_parameter( 'timestamp_scale_factor', 'string' , scale_name)
+        self.recalculate_timestamp_text_position()
         
     def start_camera(self):
         if self.camera_detected:
@@ -125,6 +147,7 @@ class CameraHandler:
                             self.current_resolution = new_resolution
                             self.config.insert_or_update_parameter( 'cam_res_width', 'int', new_resolution[0] )
                             self.config.insert_or_update_parameter( 'cam_res_height', 'int', new_resolution[1] )
+                            self.recalculate_timestamp_text_position()
 
     def is_camera_detected(self):
         return self.camera_detected
@@ -153,6 +176,8 @@ class CameraHandler:
                     self.change_resolution( post_data[ 'selected_resolution' ] )
             if 'image_rotation' in post_data:
                 self.set_new_rotation( post_data[ 'image_rotation' ] )
+            if 'timestamp_scale' in post_data:
+                self.set_new_timestamp_scale( post_data[ 'timestamp_scale' ] )
     
     # Get the resolutions the camera can do  
     # Should be called once on boot           
@@ -176,12 +201,47 @@ class CameraHandler:
             return None
         
         return resolutions
+        
+    def append_camera_current_config(self, config):
+        config['available_camera_resolutions'] = self.get_camera_resolutions()
+        config['current_camera_resolution'] = self.get_camera_current_resolutions()
+        config['is_camera_available'] = self.is_camera_detected()
+        return config
+        
+    def recalculate_timestamp_text_position( self ):
+        timestamp_text = str(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        
+        with self.option_change_lock:
+            # Base text size - set for an image resolution of 640x480
+            self.timestamp_text_scale = 0.5
+            # Scale up or down the text size based on the actual camera resolution setting with reference to the 640x480 base size
+            self.timestamp_text_scale *= (self.current_resolution[1] / 480)
+            # Further scale up or down the text size based on the user text size config setting       
+            self.timestamp_text_scale *= self.timestamp_scale_factor       
 
-    def add_timestamp(frame):
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # Increase the thickness of the font at higher camera resolutions
+            self.timestamp_thickness_inner = int((self.current_resolution[1] / 480))
+            if self.timestamp_thickness_inner < 1:
+                self.timestamp_thickness_inner = 1
+            self.timestamp_thickness_outer = self.timestamp_thickness_inner*2    
+            
+            # Predict the resulting text size so we can calculate a position on screen
+            (text_width, text_height), baseline = cv2.getTextSize(timestamp_text, cv2.FONT_HERSHEY_SIMPLEX, self.timestamp_text_scale, self.timestamp_thickness_outer)
+            
+            top_padding_pixels_at_480 = 2
+            self.timestamp_left_edge = 2
+            
+            self.timestamp_bottom_edge = text_height + int(((self.current_resolution[1] / 480)*top_padding_pixels_at_480))
+        
+
+    def add_timestamp(self, frame):
+        timestamp_text = str(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         # Text drawn twice to make the font outline - so it's visible on any background colour
-        cv2.putText(frame, timestamp, (5, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2, cv2.LINE_AA)
-        cv2.putText(frame, timestamp, (5, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+
+        # Draw the text twice, once at a thicker size and once at a thinner size to get an outline effect
+        # This improves visibility of the text at all camera constrasts
+        cv2.putText(frame, timestamp_text, (self.timestamp_left_edge, self.timestamp_bottom_edge), cv2.FONT_HERSHEY_SIMPLEX, self.timestamp_text_scale, (0, 0, 0), self.timestamp_thickness_outer, cv2.LINE_AA)
+        cv2.putText(frame, timestamp_text, (self.timestamp_left_edge, self.timestamp_bottom_edge), cv2.FONT_HERSHEY_SIMPLEX, self.timestamp_text_scale, (255, 255, 255), self.timestamp_thickness_inner, cv2.LINE_AA)
         return frame
     
     # Returns an image with some text on it for debugging

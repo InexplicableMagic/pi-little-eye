@@ -96,7 +96,7 @@ class DBConfigHandler:
             whitelisted BOOLEAN CHECK (whitelisted IN (0, 1))
         );
         ''')
-
+        
         # Level: warning, info or error
         # Alert: true if the log line should be specifically highlighted to an admin on login, such as a security problem
         # Username: that attempted the action or username presented on login
@@ -114,6 +114,19 @@ class DBConfigHandler:
             type TEXT NOT NULL,
             message TEXT NOT NULL
         );
+        ''')
+        
+        # Version number of the software this database was created with 
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS created_with_version (
+                created_with_version TEXT
+            )
+        ''')
+        
+        cursor.execute('''
+            INSERT INTO created_with_version (created_with_version)
+            SELECT '1.0.0'
+            WHERE NOT EXISTS (SELECT 1 FROM created_with_version)
         ''')
 
         conn.commit()
@@ -139,6 +152,8 @@ class DBConfigHandler:
             self.insert_or_update_parameter( 'delete_log_after_days', 'int', 90 )
             # Default image rotation in degrees: 0, 90, 180 or 270
             self.insert_or_update_parameter( 'image_rotation', 'int', 0 )
+            # Default timestamp text scale multiplier, sets the size of the timestamp text
+            self.insert_or_update_parameter( 'timestamp_scale_factor', 'string' , 'medium')
 
         ip_lists = self.get_ip_allow_list()
         self.ip_response = dict()
@@ -507,6 +522,10 @@ class DBConfigHandler:
             if not isinstance( value, int ):
                 raise ValueError( "Bad value type for parameter insert. Expected int" )
             value = str( value )
+        elif datatype == 'float':
+            if not isinstance( value, float ):
+                 raise ValueError( "Bad value type for parameter insert. Expected float" )
+            value=str( value )
         else:
             raise ValueError( "Bad datatype for parameter insert" )
             
@@ -547,6 +566,8 @@ class DBConfigHandler:
                     return False
             elif datatype == 'int':
                 return int( value )
+            elif datatype == 'float':
+                return float( value )
             else:
                 return str(value)
                 
@@ -1102,7 +1123,8 @@ class DBConfigHandler:
                         'enforce_ip_whitelist': self.get_parameter_value('enforce_ip_whitelist'),
                         'usernames' : self.list_all_usernames(),
                         'app_keys' : self.list_all_app_keys(),
-                        'image_rotation': self.get_parameter_value('image_rotation')
+                        'image_rotation': self.get_parameter_value('image_rotation'),
+                        'timestamp_scale': self.get_parameter_value('timestamp_scale_factor')
                    }
             
         return config_data
