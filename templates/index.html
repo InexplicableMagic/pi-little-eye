@@ -43,13 +43,13 @@
     <div id="configuration-window">
     
         <div id="panel-selector">
-            <button class="config-panel-selector-button" onclick="displayPanel()">
+            <button class="config-panel-selector-button" onclick="switchConfigPanel('user')">
                 <img class="config-panel-icon-image" src="static/icons/Faenza-emblem-people.svg" alt="User account settings">
             </button>
-            <button class="config-panel-selector-button" onclick="displayPanel()">
+            <button class="config-panel-selector-button" onclick="switchConfigPanel('camera')">
                 <img class="config-panel-icon-image" src="static/icons/Faenza-camera-web.svg" alt="Camera settings">
             </button>
-            <button class="config-panel-selector-button" onclick="displayPanel()">
+            <button class="config-panel-selector-button" onclick="switchConfigPanel('security')">
                 <img class="config-panel-icon-image" src="static/icons/Faenza-lock.svg" alt="Security settings">
             </button>
             
@@ -58,7 +58,7 @@
             </button>
         </div>
         
-        <div id="user-management-panel" class="config-panel">
+        <div id="user-management-panel" >
             <div class="configuaration-section-container">
                 <div id="user-management-section" class="configuration-section" >
                     <span>Manage Camera Users</span>
@@ -67,6 +67,12 @@
                     <div class="vertical-list">
                         <input id="new-username-field" placeholder="new username">
                         <input id="new-user-password-field" type="password" placeholder="initial password">
+                        <div class="side-by-side">
+                            <input type="radio" id="account-type-view-only" name="account-type-select" value="view-only" checked>
+                            <label for="account-type-view-only">View Only</label>
+                            <input type="radio" id="account-type-admin" name="account-type-select" value="admin" >
+                            <label for="account-type-admin">Full Admin</label>
+                        </div>
                         <button id="add-new-user-button" onclick="addNewUser()" disabled >Add User</button>
                         <span id="add-new-user-info"></span>
                     </div>  
@@ -95,29 +101,45 @@
                 </div> 
             </div>
         </div>
+
+        <div id="camera-config-panel" >
+            <div id="camera-parameters-section" class="configuration-section" >
+                <div class="vertical-list">
+                    <label for="camera-resolutions-select">Camera resolution:</label>
+                    <select id="camera-resolutions-select"></select>
+                    <label for="camera-rotation-select">Rotate camera:</label>
+                    <select id="camera-rotation-select">
+                        <option value="0">No rotation</option>
+                        <option value="90">90 degrees</option>
+                        <option value="180">180 degrees</option>
+                        <option value="270">270 degrees</option>
+                    </select>
+                    <button onclick="saveConfig();">Save Changes</button>
+                </div>
+            </div>
+        </div>
         
+        <div id="security-panel" >
+            <div id="ip-block-section" class="configuration-section" >
+                <div class="vertical-list">
+                    <div class="side-by-side">
+                        <input type="radio" id="any-ip-radio" name="ips-allowed" value="any-ip" checked>
+                        <label for="any-ip-radio">Any IP can access camera</label>
+                    </div>
+                    <div class="side-by-side">
+                        <input type="radio" id="allowed-ips-radio" name="ips-allowed" value="allowed-ips">
+                        <label for="allowed-ips-radio">Only below IP ranges can access camera</label>
+                    </div>
+                    <label for="allowed-ip-list">List of allowed IP ranges:</label>
+                    <textarea id="allowed-ip-list" name="allowed-ip-list" placeholder="192.168.*" rows="4" cols="25"></textarea>
+                    <button onclick="saveConfig();" id="config-save-changes-button">Save Changes</button>
+                </div>
+            </div>
         </div>
-        <div id="security-panel" class="config-panel">
-            <button onclick="saveConfig();" id="config-save-changes-button">Save Changes</button>
-            <input type="radio" id="any-ip-radio" name="ips-allowed" value="any-ip" checked>
-            <label for="any-ip-radio">Any IP can access camera</label><br/>
-            <input type="radio" id="allowed-ips-radio" name="ips-allowed" value="allowed-ips">
-            <label for="allowed-ips-radio">Only below IP ranges can access camera</label><br/>
-            <textarea id="allowed-ip-list" name="allowed-ip-list" placeholder="192.168.*" rows="4" cols="25"></textarea>
-            <label for="allowed-ip-list">List of allowed IP ranges:</label>
-            <button onclick="saveConfig();" id="config-save-changes-button">Save Changes</button>
+        
+        <div id="logs-panel" >
         </div>
-        <div id="camera-config-panel" class="config-panel">
-            <select id="camera-resolutions-select"></select>
-            <select id="camera-rotation-select">
-                <option value="0">No rotation</option>
-                <option value="90">90 degrees</option>
-                <option value="180">180 degrees</option>
-                <option value="270">270 degrees</option>
-            </select>
-        </div>
-        <div id="logs-panel" class="config-panel">
-        </div>        
+          
     </div>
     <div id="message-window">
         <span id="initial-message" class="initial-message-class">Contacting camera...</span>

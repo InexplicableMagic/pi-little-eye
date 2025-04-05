@@ -170,7 +170,7 @@ class DBConfigHandler:
                 message = 'Expecting a log message but unexpectedly none set.'
             if len(message) > 4096:
                 message = message[:4096]+ ' ... log message truncated at 4096 characters'
-        
+
             insert_log_line_sql = "INSERT INTO log (level, alert, username, ip_route, type, message) VALUES( ?,?,?,?,?,? )"
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()

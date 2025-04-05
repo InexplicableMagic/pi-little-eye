@@ -3,7 +3,6 @@ body {
     margin: 0;
     padding: 0;
     height: 100vh;
-    background-color: #f0f0f0;
     overflow-x: hidden; /* Prevent horizontal scrolling */
 }
 
@@ -117,9 +116,11 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 10px;
+    padding: 5px;
     background-color: #333;
     color: white;
+    flex-shrink: 0;
+    height: 30px;
 }
 
 /* Display in the middle of the nav bar */
@@ -130,11 +131,14 @@ body {
 
 /* Div that holds the video image */
 #video-container {
-    flex-grow: 1;
+    background-color: #000000;
     display: flex;
     justify-content: center;
-    align-items: center;
+    align-items: flex-start;
     overflow: hidden;
+    flex-grow: 1;
+    height: calc(100vh - 40px); /* Subtract nav-bar height from viewport height */
+    width: 100%; /* Ensure full width */
 }
 
 /* Expand the video image to 100% */
@@ -156,8 +160,22 @@ body {
 
 /* Styling for one panel of the config settings */
 .config-panel {
-     display: none;
+     
 }
+
+#user-management-panel {
+     display: block; 
+}
+
+#security-panel {
+     display: none; 
+}
+
+#camera-config-panel{
+     display: none; 
+}
+
+
 
 /* Styling that produces the 3 bar hamburger menu icon */
 .hamburger-menu-class {

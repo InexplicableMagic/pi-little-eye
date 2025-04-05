@@ -453,11 +453,16 @@ def set_pass():
                                                 if username_authenticated != username_postdata:
                                                     # Allow the change if the user has authenticated as an admin
                                                     if not dbch.test_user_exists( username_postdata ):
-                                                        if dbch.set_pass( username_postdata, 'viewer', new_password ):
-                                                            response = make_response( jsonify( { 'error': False, 'message': 'Password set.' } ), 200 )
-                                                            log_entry( 'info', 'password_set', f"Added user {username_postdata}", username=username_authenticated )
+                                                        account_type_postdata = post_data.get('account_type', 'viewer')
+                                                        if account_type_postdata in ['admin', 'viewer']:
+                                                            if dbch.set_pass( username_postdata, account_type_postdata, new_password ):
+                                                                response = make_response( jsonify( { 'error': False, 'message': 'Password set.' } ), 200 )
+                                                                log_entry( 'info', 'password_set', f"Added new account \"{username_postdata}\" of type \"{account_type_postdata}\"", username=username_authenticated )
+                                                                
+                                                            else:
+                                                                response = make_response( jsonify( { 'error': False, 'message': 'Failed to set password.' } ), 500 )
                                                         else:
-                                                            response = make_response( jsonify( { 'error': False, 'message': 'Failed to set password.' } ), 500 )
+                                                            response = make_response( jsonify( { 'error': True, 'message': 'Error, account type must be admin or viewer.','err_type': 'wrong_account_type' } ), 400 )    
                                                     else:
                                                         response = make_response( jsonify( { 'error': True, 'message': 'Error, user already exists','err_type': 'user_exists' } ), 400 )
                                                 else:

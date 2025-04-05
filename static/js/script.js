@@ -70,17 +70,25 @@ function addNewUser(){
     const new_user_name = document.getElementById('new-username-field');
     const new_user_pass = document.getElementById('new-user-password-field');
     const addNewUserInfo = document.getElementById('add-new-user-info');
+    
+    let accountType = "viewer"; 
+    if( document.getElementById('account-type-admin').checked ){
+        accountType = "admin";
+    }
+     
     addNewUserInfo.textContent = '';
     getChallenge()
     .then(challenge => {    
-        return setPass(new_user_name.value, new_user_pass.value, challenge);
+        return setPass(new_user_name.value, new_user_pass.value, accountType, challenge);
     }).then(result => {
         if( result && result.error == false ){
             console.log("New user added.")
             resetConfigOnUI();
+            new_user_pass.value='';
         }else{
             console.log("Error on adding user:"+result.message)
             addNewUserInfo.textContent = result.message;
+            new_user_pass.value='';
         }
     })
   .catch(error => {
@@ -137,13 +145,17 @@ function deleteAppKey(app_key) {
 
 }
 
-function setPass(username, password, challenge, orignalPassword = null) {
+function setPass(username, password, accountType, challenge, orignalPassword = null) {
   
   const data = {
     new_password: password,
     challenge: challenge,
     csrf_token: csrfToken
   };
+  
+  if( accountType != null){
+    data.account_type = accountType
+  }
   
   if(orignalPassword !== null){
     data.original_password = orignalPassword
@@ -361,7 +373,7 @@ function restGetCallNoParamsWithChallenge(url){
 function setInitialPassword(username, password) {
   getChallenge()
   .then(challenge => {    
-    return setPass(username, password, challenge);
+    return setPass(username, password, 'admin', challenge);
   }).then(result => {
     if( result && result.error == false ){
         console.log("Password set.")
@@ -395,7 +407,7 @@ function changeCurrentUserPassword(  ) {
   
   getChallenge()
   .then(challenge => {    
-    return setPass(null, new_password, challenge, original_password);
+    return setPass(null, new_password, null, challenge, original_password);
   }).then(result => {
     changePassButton.disabled = false;
     if( result && result.error == false ){
@@ -855,8 +867,8 @@ function addEventListeners() {
                     // Removing the video element is not sufficient. It keeps downloading
                     // in the backgroud
                     videoImg.src=""
-                    videoImg.remove()
-                    console.log("video dropped:"+ new Date().getTime())
+                    videoImg.remove();
+                    console.log("video dropped:"+ new Date().getTime());
                 }
             }
      });
@@ -874,7 +886,8 @@ function restartVideoFeed() {
         const videoContainer = document.getElementById('video-container')
         const vfIMGElement = document.getElementById('video-feed');
         if(vfIMGElement){
-            vfIMGElement.remove()
+            vfIMGElement.src="";
+            vfIMGElement.remove();
         }
 
         videoContainer.appendChild(img);
@@ -1011,6 +1024,28 @@ function setWindowVisibilityState() {
             initialMessageWindowDiv.style.display = 'flex';
         }
     });
+}
+
+function switchConfigPanel(whichPanel) {
+        const userManagementPanel = document.getElementById('user-management-panel');
+        const securityPanel = document.getElementById('security-panel');
+        const cameraConfigPanel = document.getElementById('camera-config-panel');
+        
+        userManagementPanel.style.display = 'none';
+        securityPanel.style.display = 'none';
+        cameraConfigPanel.style.display = 'none';
+        
+        switch(whichPanel){
+            case "user":
+                userManagementPanel.style.display = 'block';
+            break;
+            case "security":
+                securityPanel.style.display = 'block';
+            break;
+            case "camera":
+                cameraConfigPanel.style.display = 'block';
+            break;
+        }
 }
 
 
