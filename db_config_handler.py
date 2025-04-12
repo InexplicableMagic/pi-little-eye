@@ -12,6 +12,7 @@ import ipaddress
 import time
 import secrets
 import sys
+import threading
 
 class DBConfigHandler:
     
@@ -27,6 +28,7 @@ class DBConfigHandler:
         
         self.delete_old_log_lines()                
         self.next_log_line_delete_time = int(time.time()) + 86400
+        self.config_change_lock = threading.Lock()
 
         
     def read_only_connection(self):
@@ -106,7 +108,7 @@ class DBConfigHandler:
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS log (
             id INTEGER PRIMARY KEY AUTOINCREMENT, 
-            ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            ts TIMESTAMP DEFAULT (datetime('now', 'localtime')),
             level TEXT NOT NULL,
             alert BOOLEAN DEFAULT FALSE,
             username TEXT,
@@ -137,7 +139,7 @@ class DBConfigHandler:
             # Initial authentication state requires a password to be set
             self.insert_or_update_parameter( 'auth_state', 'string', 'nopass' )
             # Enforce an initial IP whitelist for local IPs only until the user has has time to set the password
-            self.insert_or_update_parameter( 'enforce_ip_whitelist', 'bool', True )
+            self.insert_or_update_parameter( 'enforce_ip_whitelist', 'bool', False )
             self.set_ip_allow_list( [ '192.168.*', '10.*', '172.16.*', 'fc*', 'fd*', '127.0.0.1' ], [] )
             # Expire user login sessions initially after 30 days - forces password re-entry after this number of days
             self.insert_or_update_parameter( 'max_session_age', 'int', 30 )
@@ -154,6 +156,10 @@ class DBConfigHandler:
             self.insert_or_update_parameter( 'image_rotation', 'int', 0 )
             # Default timestamp text scale multiplier, sets the size of the timestamp text
             self.insert_or_update_parameter( 'timestamp_scale_factor', 'string' , 'medium')
+            # Default timestamp text position
+            self.insert_or_update_parameter( 'timestamp_position', 'string' , 'top-left')
+            # Whether the timestamp should be displayed
+            self.insert_or_update_parameter( 'display_timestamp', 'bool', True )
 
         ip_lists = self.get_ip_allow_list()
         self.ip_response = dict()
@@ -198,12 +204,16 @@ class DBConfigHandler:
                conn.close()    
     
     # Roll off old log lines
-    def delete_old_log_lines( self ):
+    # If full_clear is True then deletes all log lines
+    def delete_old_log_lines( self, full_clear = False ):
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             min_time = datetime.now() - timedelta(days=self.get_parameter_value('delete_log_after_days') )
-            cursor.execute('DELETE FROM log WHERE ts < ?', (min_time,) )
+            if full_clear:
+                cursor.execute('DELETE FROM log;')
+            else:
+                cursor.execute('DELETE FROM log WHERE ts < ?;', (min_time,) )
             conn.commit()
         except Exception as e:
             print(f"An error occurred (delete_old_log_lines): {e}", file=sys.stderr)
@@ -1124,13 +1134,13 @@ class DBConfigHandler:
                         'usernames' : self.list_all_usernames(),
                         'app_keys' : self.list_all_app_keys(),
                         'image_rotation': self.get_parameter_value('image_rotation'),
-                        'timestamp_scale': self.get_parameter_value('timestamp_scale_factor')
+                        'timestamp_scale': self.get_parameter_value('timestamp_scale_factor'),
+                        'display_timestamp': self.get_parameter_value('display_timestamp'),
+                        'timestamp_position': self.get_parameter_value('timestamp_position')
                    }
             
         return config_data
-       
-       
-    
+
     def validate_config_object( config_object ):
         if config_object:
             keys = [ 'allowed_ips', 'enforce_ip_whitelist' ]
@@ -1175,13 +1185,22 @@ class DBConfigHandler:
     
     # Assumes validated input (use validate_config_object)
     def set_config( self, config_object ):
-          self.set_ip_allow_list( config_object['allowed_ips']['whitelisted'], config_object['allowed_ips']['blacklisted'] )
-          
-          self.insert_or_update_parameter( 'enforce_ip_whitelist', 'bool', config_object['enforce_ip_whitelist'] )
-          self.enforce_ip_whitelist = config_object['enforce_ip_whitelist']
-          
-          self.insert_or_update_parameter( 'image_rotation', 'int', config_object['image_rotation'] )
-          
+            with self.config_change_lock:
+                if 'allowed_ips' in config_object:
+                    self.set_ip_allow_list( config_object['allowed_ips']['whitelisted'], config_object['allowed_ips']['blacklisted'] )
+
+                if 'enforce_ip_whitelist' in config_object:
+                    self.insert_or_update_parameter( 'enforce_ip_whitelist', 'bool', config_object['enforce_ip_whitelist'] )
+                    self.enforce_ip_whitelist = config_object['enforce_ip_whitelist']
+                
+                if 'image_rotation' in config_object:
+                    self.insert_or_update_parameter( 'image_rotation', 'int', config_object['image_rotation'] )
+                if 'display_timestamp' in config_object:
+                    self.insert_or_update_parameter( 'display_timestamp', 'bool', config_object['display_timestamp'] )
+                if 'timestamp_position' in config_object:
+                    self.insert_or_update_parameter( 'timestamp_position', 'string' , config_object['timestamp_position'] )
+                if 'timestamp_scale_factor' in  config_object:
+                    self.insert_or_update_parameter( 'timestamp_scale_factor', 'string' , config_object['timestamp_scale_factor'] )
     
     def validate_appkey_auth( self, appkey, secret ):
         try:                    

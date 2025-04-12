@@ -23,7 +23,9 @@ class CameraHandler:
         self.selected_camera_number = config.get_parameter_value( 'cam_number' )
         self.user_selected_res = ( config.get_parameter_value( 'cam_res_width' ), config.get_parameter_value( 'cam_res_height' ) )
         self.image_rotation_degrees = self.config.get_parameter_value( 'image_rotation' )
-        (scale_name, self.timestamp_scale_factor) = CameraHandler.scale_name_to_scale_value( self.config.get_parameter_value( 'timestamp_scale_factor' ) )
+        self.timestamp_scale_name = self.config.get_parameter_value( 'timestamp_scale_factor' )
+        self.timestamp_position = config.get_parameter_value( 'timestamp_position' )
+        self.display_timestamp = config.get_parameter_value( 'display_timestamp' )
         self.camera_state_change_lock = threading.Lock()
         self.frame_publish_lock = threading.Lock()
         self.option_change_lock = threading.Lock()
@@ -41,6 +43,7 @@ class CameraHandler:
             self.available_resolutions = resolutions
             self.current_resolution = CameraHandler.__suggest_camera_resolution( resolutions, self.user_selected_res )
             self.camera_detected = True
+
         self.recalculate_timestamp_text_position()
 
     def publish_image(self):
@@ -51,7 +54,8 @@ class CameraHandler:
             frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2RGB)  # Convert XRGB to RGB
             with self.option_change_lock:
                frame = CameraHandler.rotate_image( frame, self.image_rotation_degrees )
-               frame = self.add_timestamp(frame)
+               if self.display_timestamp:
+                   frame = self.add_timestamp(frame)
             ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 50] )
             frame = buffer.tobytes()
             with self.frame_publish_lock:
@@ -75,7 +79,6 @@ class CameraHandler:
             if (rotation <= 270) and ((rotation % 90) == 0):
                 with self.option_change_lock:
                     self.image_rotation_degrees = rotation
-                self.recalculate_timestamp_text_position()
 
     def scale_name_to_scale_value( scale_name ):
         new_scaling = float( 1.0 )
@@ -87,14 +90,19 @@ class CameraHandler:
             scale_name = 'medium'
             new_scaling = 1.0
         
-        return (scale_name, new_scaling)
+        return new_scaling
                     
     def set_new_timestamp_scale( self, scale_name ):
-        (scale_name, new_scaling) = CameraHandler.scale_name_to_scale_value( scale_name )
         with self.option_change_lock:
-            self.timestamp_scale_factor = new_scaling
-        self.config.insert_or_update_parameter( 'timestamp_scale_factor', 'string' , scale_name)
-        self.recalculate_timestamp_text_position()
+            self.timestamp_scale_name = scale_name
+        
+    def set_new_timestamp_position( self, position ):
+        with self.option_change_lock:
+            self.timestamp_position = position
+            
+    def set_display_timestamp( self, do_display ):
+        with self.option_change_lock:
+            self.display_timestamp = do_display
         
     def start_camera(self):
         if self.camera_detected:
@@ -144,9 +152,11 @@ class CameraHandler:
                                         self.picam2.switch_mode(new_config)
                             
                             # Update the config with the selected resolution
-                            self.current_resolution = new_resolution
-                            self.config.insert_or_update_parameter( 'cam_res_width', 'int', new_resolution[0] )
-                            self.config.insert_or_update_parameter( 'cam_res_height', 'int', new_resolution[1] )
+                            with self.option_change_lock:
+                                self.current_resolution = new_resolution
+                                self.config.insert_or_update_parameter( 'cam_res_width', 'int', new_resolution[0] )
+                                self.config.insert_or_update_parameter( 'cam_res_height', 'int', new_resolution[1] )
+                            
                             self.recalculate_timestamp_text_position()
 
     def is_camera_detected(self):
@@ -178,6 +188,12 @@ class CameraHandler:
                 self.set_new_rotation( post_data[ 'image_rotation' ] )
             if 'timestamp_scale' in post_data:
                 self.set_new_timestamp_scale( post_data[ 'timestamp_scale' ] )
+            if 'timestamp_position' in post_data:
+                self.set_new_timestamp_position( post_data[ 'timestamp_position' ] )
+            if 'display_timestamp' in post_data:
+                self.set_display_timestamp(  post_data[ 'display_timestamp' ] )
+            
+            self.recalculate_timestamp_text_position()
     
     # Get the resolutions the camera can do  
     # Should be called once on boot           
@@ -207,17 +223,19 @@ class CameraHandler:
         config['current_camera_resolution'] = self.get_camera_current_resolutions()
         config['is_camera_available'] = self.is_camera_detected()
         return config
-        
+    
+    # When user config options change, or the resolution changes then change the position of the timestamp text on screen    
     def recalculate_timestamp_text_position( self ):
         timestamp_text = str(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         
         with self.option_change_lock:
+            timestamp_scale_factor = CameraHandler.scale_name_to_scale_value( self.timestamp_scale_name )
             # Base text size - set for an image resolution of 640x480
             self.timestamp_text_scale = 0.5
             # Scale up or down the text size based on the actual camera resolution setting with reference to the 640x480 base size
             self.timestamp_text_scale *= (self.current_resolution[1] / 480)
             # Further scale up or down the text size based on the user text size config setting       
-            self.timestamp_text_scale *= self.timestamp_scale_factor       
+            self.timestamp_text_scale *= timestamp_scale_factor       
 
             # Increase the thickness of the font at higher camera resolutions
             self.timestamp_thickness_inner = int((self.current_resolution[1] / 480))
@@ -225,14 +243,37 @@ class CameraHandler:
                 self.timestamp_thickness_inner = 1
             self.timestamp_thickness_outer = self.timestamp_thickness_inner*2    
             
-            # Predict the resulting text size so we can calculate a position on screen
+            # Predict the resulting width/height of the timestamp text in pixels so we can calculate the screen position from this
             (text_width, text_height), baseline = cv2.getTextSize(timestamp_text, cv2.FONT_HERSHEY_SIMPLEX, self.timestamp_text_scale, self.timestamp_thickness_outer)
             
-            top_padding_pixels_at_480 = 2
-            self.timestamp_left_edge = 2
+            # Amount of padding from the edges of the image based on 640x480 resolution
+            top_padding_pixels_at_480 = 3
+            side_padding_pixels_at_640 = 1
             
-            self.timestamp_bottom_edge = text_height + int(((self.current_resolution[1] / 480)*top_padding_pixels_at_480))
-        
+            # Rescale the padding for higher resolutions
+            top_padding_resolution_scaled = int(((self.current_resolution[1] / 480)*top_padding_pixels_at_480))
+            side_padding_pixels_resolution_scaled = int(((self.current_resolution[0] / 640)*side_padding_pixels_at_640))
+            
+            image_width = self.current_resolution[0]
+            image_height = self.current_resolution[1]
+            if self.image_rotation_degrees == 90 or self.image_rotation_degrees == 270:
+                image_width = self.current_resolution[1]
+                image_height = self.current_resolution[0]
+            
+            # Position the timestamp text based on the user config selection
+            if self.timestamp_position == 'top-left':
+                self.timestamp_left_edge = side_padding_pixels_resolution_scaled
+                self.timestamp_bottom_edge = text_height + top_padding_resolution_scaled
+            elif self.timestamp_position == 'top-right':
+                self.timestamp_left_edge = image_width - text_width - side_padding_pixels_resolution_scaled
+                self.timestamp_bottom_edge = text_height + top_padding_resolution_scaled
+            elif self.timestamp_position == 'bottom-left':
+                self.timestamp_left_edge = side_padding_pixels_resolution_scaled
+                self.timestamp_bottom_edge = image_height - top_padding_resolution_scaled - 1
+            else:
+                # Bottom right
+                self.timestamp_left_edge = image_width - text_width - side_padding_pixels_resolution_scaled
+                self.timestamp_bottom_edge = image_height - top_padding_resolution_scaled - 1            
 
     def add_timestamp(self, frame):
         timestamp_text = str(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))

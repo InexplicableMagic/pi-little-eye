@@ -181,7 +181,7 @@ def logout():
                         dbch.remove_all_user_sessions( user_to_logout )
                         ch.logout_user( user_to_logout )
                         logout_this_user = False
-                        log_entry( 'info', 'logout', f"Admin logged out user \"{user_to_logout}\"" )
+                        log_entry( 'info', 'logout', f"Admin logged out user \"{user_to_logout}\"", username=this_user_username )
                         response = make_response( jsonify(  { 'error': False, 'message': 'User logged out' } ), 200 )
                     else:
                         response = make_response( jsonify(  { 'error': True, 'message': 'Not authorised to logout other users' } ), 403 )
@@ -189,7 +189,7 @@ def logout():
         if logout_this_user:
             dbch.remove_all_user_sessions( this_user_username )
             ch.logout_user( this_user_username )
-            log_entry( 'info', 'logout', f"Logged out" )
+            log_entry( 'info', 'logout', f"Logged out", username=this_user_username )
             response = make_response( jsonify (  { 'error': False, 'message': 'logged out' } ), 200 )
             response.delete_cookie('session_id')
             response.delete_cookie('auth_token')
@@ -236,7 +236,7 @@ def set_config():
                         dbch.set_config( post_data )
                         # Set options that change the camera state
                         ch.set_config( post_data )
-                        log_entry( 'info', 'config_change', "Modified configuration" )
+                        log_entry( 'info', 'config_change', "Modified configuration", alert=False, username=username )
                         response = make_response( jsonify ( { 'error': False, 'message': 'Config set' } ), 200 )
                     else:
                         response = make_response( jsonify ( { 'error': True, 'message': 'Config validation error' } ), 400 )
@@ -279,6 +279,33 @@ def get_logs():
             response = make_response( jsonify ( { 'error': True, 'message': 'Only admin user can see the logs' } ), 403 )
         
     return response
+
+@app.route('/api/v1/log-management', methods=['POST'])
+@nocache  
+def log_management():
+    response = make_response( jsonify(  { 'error': True, 'message': 'unknown error' } ), 500 )
+    (authenticated, message, http_code, username) = is_cookie_authenticated( )
+    if not authenticated:
+        response =  make_response( jsonify ( { 'error': True, 'message': message } ), http_code )
+    else:
+        current_user_permissions = dbch.get_user_permissions( username )
+        if current_user_permissions == 'admin':
+            post_data = request.get_json(silent=True)
+            if post_data:
+                csrf_in_post = post_data.get('csrf_token', None)
+                csrf_in_cookie = request.cookies.get('csrf_token')
+                if DBConfigHandler.is_uuid_valid( csrf_in_cookie ) and DBConfigHandler.is_uuid_valid( csrf_in_post ) and csrf_in_cookie == csrf_in_post:
+                    if 'full_clear' in post_data and post_data['full_clear']:
+                        dbch.delete_old_log_lines( full_clear = True )
+                        log_entry( 'info', 'logs_cleared', f"Cleared logs", username=username )
+                else:
+                    response = make_response( jsonify ( { 'error': True, 'message': 'CSRF parameter or cookie problem', 'err_type': 'csrf_problem' } ), 400 )
+                    log_entry( 'warning', 'csrf', f"Anti cross-site script check failure when managing logs. Might be a browser cookie problem but could indicate a possible malicious link click.", alert=True )       
+        else:
+            response = make_response( jsonify ( { 'error': True, 'message': 'Only admin user can manage the logs' } ), 403 )
+        
+    return response
+
    
 # Lock/unlock or delete a user account
 @app.route('/api/v1/account-management', methods=['POST'] )
@@ -307,29 +334,29 @@ def account_management():
                                         dbch.lock_unlock_delete_account( username_postdata, 'lock' )
                                         dbch.remove_all_user_sessions( username_postdata )
                                         ch.logout_user( username_postdata )
-                                        log_entry( 'info', 'account_locked', f"Account \"{username_postdata}\" locked" )
+                                        log_entry( 'info', 'account_locked', f"Account \"{username_postdata}\" locked", username=username_authenticated )
                                         response = make_response( jsonify ( { 'error': False, 'message': 'Account locked' } ), 200 )
                                     elif action == 'unlock':
                                         dbch.lock_unlock_delete_account( username_postdata, 'unlock' )
-                                        log_entry( 'info', 'account_unlocked', f"Account \"{username_postdata}\" unlocked" )
+                                        log_entry( 'info', 'account_unlocked', f"Account \"{username_postdata}\" unlocked", username=username_authenticated )
                                         response = make_response( jsonify ( { 'error': False, 'message': 'Account unlocked' } ), 200 )
                                     elif action == 'delete':
                                         dbch.lock_unlock_delete_account( username_postdata, 'delete' )
                                         dbch.remove_all_user_sessions( username_postdata )
                                         ch.logout_user( username_postdata )
-                                        log_entry( 'info', 'account_deleted', f"Account \"{username_postdata}\" deleted" )
+                                        log_entry( 'info', 'account_deleted', f"Account \"{username_postdata}\" deleted", username=username_authenticated )
                                         response = make_response( jsonify ( { 'error': False, 'message': 'Account deleted' } ), 200 )
                                     else:
                                         response = make_response( jsonify ( { 'error': True, 'message': 'Incorrect action. Must be unlock,lock or delete', 'err_type': 'bad_action' } ), 400 )        
                                 else:
                                     response = make_response( jsonify ( { 'error': True, 'message': 'Cant lock/unlock or delete own account.', 'err_type': 'username_missing' } ), 403 )
                             else:
-                                log_entry( 'warning', 'admin', f"Attempted to perform account management on non-existent account", alert=True )
+                                log_entry( 'warning', 'admin', f"Attempted to perform account management on non-existent account", alert=True, username=username_authenticated )
                                 response = make_response( jsonify ( { 'error': True, 'message': 'username doesnt exist', 'err_type': 'user_not_exists' } ), 400 )
                         else:
                             response = make_response( jsonify ( { 'error': True, 'message': 'Username missing in post data', 'err_type': 'username_missing' } ), 400 )
                     else:
-                        log_entry( 'warning', 'admin', f"Attempted to perform account management but not an admin", alert=True )
+                        log_entry( 'warning', 'admin', f"Attempted to perform account management but not an admin", alert=True, username=username_authenticated )
                         response = make_response( jsonify ( { 'error': True, 'message': 'Only admin account can perform this operation', 'err_type': 'needs_admin' } ), 403 )
             else:
                 response = make_response( jsonify ( { 'error': True, 'message': 'CSRF parameter or cookie problem', 'err_type': 'csrf_problem' } ), 400 )

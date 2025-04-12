@@ -11,6 +11,7 @@ const logoutURL = '/api/v1/logout';
 const generateAppKeyURL = '/api/v1/generate-app-key';
 const accountManagementURL = '/api/v1/account-management';
 const deleteAppKeyURL = '/api/v1/delete-app-key';
+const manageLogsURL = '/api/v1/log-management';
 
 const userTableID = 'user-table'
 
@@ -120,6 +121,33 @@ function lockUnlockDelete(username, action) {
   });
 
 }
+
+function clearLogs() {
+  
+  const data = {
+    csrf_token: csrfToken,
+    full_clear: true
+  };
+  
+  return fetch(manageLogsURL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(data)
+  })
+  .then(response => {
+    if (!response.ok) {
+      console.log(response)
+      throw new Error('Network error returned from clearLogs');
+    }else{
+        addLogsToUI();
+    }
+    return response.json();
+  });
+
+}
+
 
 function deleteAppKey(app_key) {
   
@@ -250,6 +278,9 @@ function resetConfigOnUI(){
             const rotationSelect = document.getElementById('camera-rotation-select');
             rotationSelect.value = config.image_rotation;
             
+            const timestampPositionSelect = document.getElementById('timestamp-position-select');
+            timestampPositionSelect.value = config.timestamp_position
+            
             const timeStampScaleSelect = document.getElementById('timestamp-text-size');
             timeStampScaleSelect.value = config.timestamp_scale
             
@@ -298,6 +329,8 @@ function convertConfigUIStateToJSON(){
     const ipTextArea = document.getElementById('allowed-ip-list');
     const rotationSelect = document.getElementById('camera-rotation-select');
     const timeStampScaleSelect = document.getElementById('timestamp-text-size');
+    const timestampPositionSelect = document.getElementById('timestamp-position-select');
+    
     allowed_ip_listing_array = convertStringListToArray( ipTextArea.value )
     if( validateIPArray( allowed_ip_listing_array ) ){
         enforce_whitelisted_ips = true
@@ -312,7 +345,8 @@ function convertConfigUIStateToJSON(){
                enforce_ip_whitelist: enforce_whitelisted_ips,
                selected_resolution: getSelectedResolution( 'camera-resolutions-select' ),
                image_rotation: Number(rotationSelect.value),
-               timestamp_scale: timeStampScaleSelect.value
+               timestamp_scale: timeStampScaleSelect.value,
+               timestamp_position: timestampPositionSelect.value
         };
         return postObject;
         
@@ -714,25 +748,36 @@ function addLogsToUI( before_id= null){
     .then( response_data => {
         if( response_data && response_data.error == false ){
             table = convertLogDataToHTMLTable( response_data.logs )
-            const targetDiv = document.getElementById('logs-panel');
-            targetDiv.innerHTML = '';
-            targetDiv.appendChild(table);
+            const targetTableDiv = document.getElementById('logs-display-section');
+            const logsButtonSection = document.getElementById('logs-next-prev-button-area');
+            targetTableDiv.innerHTML = '';
+            logsButtonSection.innerHTML = ''
+            targetTableDiv.appendChild(table);
             //Whether to generate a "next" button
-            if( response_data.page_end > response_data.min_id ){
-                page_from_end = response_data.page_end - 1;
-                const button = document.createElement('button');
-                button.textContent = 'Next';
-                button.addEventListener('click', function(){ addLogsToUI( before_id=page_from_end ); } );
-                targetDiv.appendChild(button);
-            }
+            
+            page_from_start = response_data.page_start + response_data.page_size;
+            const newerButton = document.createElement('button');
+            newerButton.disabled = true
+            newerButton.textContent = 'Newer';
+            newerButton.addEventListener('click', function(){ addLogsToUI( before_id=page_from_start ); } );
+            logsButtonSection.appendChild(newerButton);
             
             if( response_data.page_start < response_data.max_id ){
-                page_from_start = response_data.page_start + response_data.page_size;
-                const button = document.createElement('button');
-                button.textContent = 'Prev';
-                button.addEventListener('click', function(){ addLogsToUI( before_id=page_from_start ); } );
-                targetDiv.appendChild(button);
+                newerButton.disabled = false;
             }
+                        
+            page_from_end = response_data.page_end - 1;
+            const olderButton = document.createElement('button');
+            olderButton.disabled = true
+            olderButton.textContent = 'Older';
+            olderButton.addEventListener('click', function(){ addLogsToUI( before_id=page_from_end ); } );
+            logsButtonSection.appendChild(olderButton);
+        
+            if( response_data.page_end > response_data.min_id ){
+                olderButton.disabled = false;
+            }
+            
+            
         }
     });
     
@@ -836,7 +881,7 @@ function addEventListeners() {
         document.getElementById('configuration-window').style.display = 'block';
     });
 
-    document.getElementById('close-config').addEventListener('click', function() {
+    document.getElementById('close-config-button').addEventListener('click', function() {
         document.getElementById('configuration-window').style.display = 'none';
     });
     
@@ -1017,7 +1062,6 @@ function setWindowVisibilityState() {
             }
             
             resetConfigOnUI();
-            addLogsToUI();
             restartVideoFeed();
         }
         
@@ -1036,10 +1080,12 @@ function switchConfigPanel(whichPanel) {
         const userManagementPanel = document.getElementById('user-management-panel');
         const securityPanel = document.getElementById('security-panel');
         const cameraConfigPanel = document.getElementById('camera-config-panel');
+        const logsConfigPanel = document.getElementById('logs-panel');
         
         userManagementPanel.style.display = 'none';
         securityPanel.style.display = 'none';
         cameraConfigPanel.style.display = 'none';
+        logsConfigPanel.style.display = 'none';
         
         switch(whichPanel){
             case "user":
@@ -1050,6 +1096,10 @@ function switchConfigPanel(whichPanel) {
             break;
             case "camera":
                 cameraConfigPanel.style.display = 'block';
+            break;
+            case "logs":
+                addLogsToUI();
+                logsConfigPanel.style.display = 'block';
             break;
         }
 }

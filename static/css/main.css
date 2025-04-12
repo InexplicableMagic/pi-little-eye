@@ -17,7 +17,7 @@ body {
     height: 100%;
     width: 90%; /* Set default width to 90% */
     max-width: 800px; /* Maximum width for larger screens */
-    padding: 10px;
+    /*padding: 10px;*/
     box-sizing: border-box; /* Include padding in width calculation */
     box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
     z-index: 1000;
@@ -28,13 +28,13 @@ body {
 #configuration-window .configuaration-section-container {
     display: flex;
     flex-direction: column;
-    gap: 10px; /* Space between sections */
 }
 
 #configuration-window .configuration-section {
     background-color: white;
     border-radius: 15px; /* Rounded corners */
-    padding: 10px; /* Optional: Add some padding inside the sections */
+    padding: 10px;
+    margin: 5px;
 }
 
 #configuration-window h2 {
@@ -43,7 +43,6 @@ body {
 
 #configuration-window button {
     margin-top: 10px;
-    padding: 10px 20px;
     height: 40px;
     background-color: #333;
     color: white;
@@ -74,19 +73,78 @@ body {
 }
 
 #configuration-window .config-panel-selector-button:hover {
-    background: none;
+    background: #ffffff;
 }
-
 
 #configuration-window .config-panel-icon-image {
     width: 50px;
     height: 50px;
 }
 
+#close-config-container {
+    overflow: hidden;
+}
+
+#logs-selection-buttons-section {
+    display: flex;
+    justify-content: space-between;
+    margin: 5px;
+}
+
+#logs-next-prev-button-area {
+    display: flex;
+    gap: 10px; /* Adjust the gap value to control spacing between buttons */
+
+}
+
+#logs-display-section {
+    margin: 5px;
+    overflow-y: auto;
+    overflow-x: auto;
+}
+
+
+#close-config-button-container {
+    justify-content: flex-end; /* Aligns the button to the right */
+    background: none; 
+    margin: 5px;
+}
+
+#close-config-button {
+    background: none; /* Remove default background */
+    background-color: transparent !important;
+    border: none; /* Remove default border */
+    cursor: pointer; /* Add pointer cursor */
+    padding: 0 !important; /* Remove default padding */
+    margin: 0 !important;
+    display: inline-block; /* Better than default inline-flex */
+}
+
+#close-config-button:hover {
+    background: none;
+    background-color: transparent;
+}
+
+.close-button-icon-image {
+    height: 40px; /* Adjust the size as needed */
+    width: 40px; /* Adjust the size as needed */
+    display: block;
+    margin: 0;
+    vertical-align: top;
+}
+
+#panel-buttons {
+    margin: 5px;
+}
+
+#panel-buttons button {
+  margin: 0;
+  padding: 0; /* Remove default button padding */
+}
+
 #set-initial-admin-password-window {
     display: none;
 }
-
 
 /* Message window displayed prior to the login screen when initially contacting the camera */
 #message-window {
