@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from flask import Flask, Response, request, render_template, jsonify, make_response, send_from_directory
+from flask import Flask, Response, request, render_template, jsonify, make_response, send_from_directory, abort
 from gevent import pywsgi
 from db_config_handler import *
 from camera_handler import *
@@ -17,6 +17,18 @@ def nocache(view):
         response.headers['Expires'] = '0'
         return response
     return no_cache
+
+# Restrict the supplied post data to 16MB which should be plenty for all the functions
+def limit_content_length(f):
+    @wraps(f)
+    def wrapper_function(*args, **kwargs):
+        # Check the Content-Length header
+        content_length = request.headers.get('Content-Length')
+        if content_length and int(content_length) > 16*1024*1024:
+            # Abort with a 413 if the content length is exceeded
+            abort(413)
+        return f(*args, **kwargs)
+    return wrapper_function
 
 # Look in the request and various headers for the client's IP address
 # Might be multiple addresses if behind a proxy
@@ -125,6 +137,7 @@ def video_mjpeg():
          return Response(CameraHandler.create_message_image("IP disallowed"),mimetype='image/png')
 
 @app.route('/api/v1/test-auth-state', methods=['POST'])
+@limit_content_length
 @nocache
 def test_auth_state():
     response = make_response( jsonify(  { 'error': True, 'message': 'unknown error' } ), 500 )
@@ -161,6 +174,7 @@ def test_auth_state():
 
 # Logout the current user, or an admin can logout a different user
 @app.route('/api/v1/logout', methods=['POST'] )
+@limit_content_length
 @nocache
 def logout():
     response = make_response( jsonify(  { 'error': True, 'message': 'unknown error' } ), 500 )
@@ -216,6 +230,7 @@ def get_config():
     return response
     
 @app.route('/api/v1/set-config', methods=['POST'] )
+@limit_content_length
 @nocache
 def set_config():
     response = make_response( jsonify(  { 'error': True, 'message': 'unknown error' } ), 500 )
@@ -281,6 +296,7 @@ def get_logs():
     return response
 
 @app.route('/api/v1/log-management', methods=['POST'])
+@limit_content_length
 @nocache  
 def log_management():
     response = make_response( jsonify(  { 'error': True, 'message': 'unknown error' } ), 500 )
@@ -298,8 +314,9 @@ def log_management():
                     if 'full_clear' in post_data and post_data['full_clear']:
                         dbch.delete_old_log_lines( full_clear = True )
                         log_entry( 'info', 'logs_cleared', f"Cleared logs", username=username )
+                        response = make_response( jsonify ( { 'error': False, 'message': 'Logs cleared' } ), 200 )
                 else:
-                    response = make_response( jsonify ( { 'error': True, 'message': 'CSRF parameter or cookie problem', 'err_type': 'csrf_problem' } ), 400 )
+                    response = make_response( jsonify ( { 'error': True, 'message': 'CSRF parameter or cookie problem. Try refreshing page.', 'err_type': 'csrf_problem' } ), 400 )
                     log_entry( 'warning', 'csrf', f"Anti cross-site script check failure when managing logs. Might be a browser cookie problem but could indicate a possible malicious link click.", alert=True )       
         else:
             response = make_response( jsonify ( { 'error': True, 'message': 'Only admin user can manage the logs' } ), 403 )
@@ -309,6 +326,7 @@ def log_management():
    
 # Lock/unlock or delete a user account
 @app.route('/api/v1/account-management', methods=['POST'] )
+@limit_content_length
 @nocache
 def account_management():
     response = make_response( jsonify(  { 'error': True, 'message': 'unknown error' } ), 500 )
@@ -359,7 +377,7 @@ def account_management():
                         log_entry( 'warning', 'admin', f"Attempted to perform account management but not an admin", alert=True, username=username_authenticated )
                         response = make_response( jsonify ( { 'error': True, 'message': 'Only admin account can perform this operation', 'err_type': 'needs_admin' } ), 403 )
             else:
-                response = make_response( jsonify ( { 'error': True, 'message': 'CSRF parameter or cookie problem', 'err_type': 'csrf_problem' } ), 400 )
+                response = make_response( jsonify ( { 'error': True, 'message': 'CSRF parameter or cookie problem. Try refreshing page.', 'err_type': 'csrf_problem' } ), 400 )
                 log_entry( 'warning', 'csrf', f"Anti cross-site script check failure in account management. Might be a browser cookie problem but could indicate a possible malicious link click.", alert=True )
     
     return response
@@ -376,6 +394,7 @@ def get_challenge():
         
 
 @app.route('/api/v1/login', methods=['POST'] )
+@limit_content_length
 @nocache
 def login():
     response = make_response( jsonify( { 'error': True, 'message': 'unknown error' } ), 500 )
@@ -421,6 +440,7 @@ def login():
     return response
 
 @app.route('/api/v1/set-pass', methods=['POST'] )
+@limit_content_length
 @nocache
 def set_pass():
     response = make_response( jsonify( { 'error': True, 'message': 'unknown error', 'err_type': 'other' } ), 500 ) 
@@ -504,7 +524,7 @@ def set_pass():
                 else:
                     response = make_response( jsonify ( { 'error': True, 'message': 'username,new-password and challenge parameters must be set in POST request.', 'err_type': 'bad_post' } ), 400 )
             else:
-                response = make_response( jsonify ( { 'error': True, 'message': 'CSRF parameter or cookie problem', 'err_type': 'csrf_problem' } ), 400 )
+                response = make_response( jsonify ( { 'error': True, 'message': 'CSRF parameter or cookie problem. Try refreshing page.', 'err_type': 'csrf_problem' } ), 400 )
                 log_entry( 'warning', 'csrf', f"Anti cross-site script check failure on trying to set password. Might be a browser cookie problem but could indicate a possible malicious link click.", alert=True )
         else:
             response = make_response( jsonify ( { 'error': True, 'message': 'JSON parse error', 'err_type': 'json_parse' } ), 400 )
@@ -515,6 +535,7 @@ def set_pass():
     return response
 
 @app.route('/api/v1/generate-app-key', methods=['POST'] )
+@limit_content_length
 @nocache
 def generate_app_key():
     response = make_response( jsonify( { 'error': True, 'message': 'unknown error', 'err_type': 'other' } ), 500 )
@@ -540,11 +561,12 @@ def generate_app_key():
                 return make_response( jsonify ( { 'error': True, 'message': message, 'err_type': 'auth_failure' } ), http_code )
         else:
             log_entry( 'warning', 'csrf', f"Anti cross-site script check failure on trying to generate appkey. Might be a browser cookie problem but could indicate a possible malicious link click.", alert=True )
-            response = make_response( jsonify ( { 'error': True, 'message': 'CSRF parameter or cookie problem when generating an app key', 'err_type': 'csrf_problem' } ), 400 )               
+            response = make_response( jsonify ( { 'error': True, 'message': 'CSRF parameter or cookie problem when generating an app key. Try refreshing page.', 'err_type': 'csrf_problem' } ), 400 )               
     
     return response
 
 @app.route('/api/v1/delete-app-key', methods=['POST'] )
+@limit_content_length
 @nocache
 def delete_app_key():
     response = make_response( jsonify( { 'error': True, 'message': 'unknown error', 'err_type': 'other' } ), 500 )
@@ -571,7 +593,7 @@ def delete_app_key():
                 return make_response( jsonify ( { 'error': True, 'message': message, 'err_type': 'auth_failure' } ), http_code )
         else:
             log_entry( 'warning', 'csrf', f"Anti cross-site script check failure on trying to delete appkey. Might be a browser cookie problem but could indicate a possible malicious link click.", alert=True )
-            response = make_response( jsonify ( { 'error': True, 'message': 'CSRF parameter or cookie problem on deleting an app key', 'err_type': 'csrf_problem' } ), 400 )               
+            response = make_response( jsonify ( { 'error': True, 'message': 'CSRF parameter or cookie problem on deleting an app key. Try refreshing page.', 'err_type': 'csrf_problem' } ), 400 )               
     
     return response
 
@@ -583,6 +605,7 @@ def static_from_root():
     
 
 @app.route('/')
+@nocache
 def index():
     csrf_token = request.cookies.get('csrf_token')
 

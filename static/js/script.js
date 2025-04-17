@@ -83,7 +83,6 @@ function addNewUser(){
         return setPass(new_user_name.value, new_user_pass.value, accountType, challenge);
     }).then(result => {
         if( result && result.error == false ){
-            console.log("New user added.")
             resetConfigOnUI();
             new_user_pass.value='';
         }else{
@@ -266,7 +265,6 @@ function resetConfigOnUI(){
     getConfig()
     .then( config => {
         if(config && 'error' in config && config.error === false) {
-            console.log(config)
             const ipStringWhitelist = config.allowed_ips.whitelisted.join('\n');
             const ipTextArea = document.getElementById('allowed-ip-list');
             ipTextArea.value = ipStringWhitelist;
@@ -279,7 +277,10 @@ function resetConfigOnUI(){
             rotationSelect.value = config.image_rotation;
             
             const timestampPositionSelect = document.getElementById('timestamp-position-select');
-            timestampPositionSelect.value = config.timestamp_position
+            timestampPositionSelect.value = config.timestamp_position;
+            
+            const displayTimestampCheckbox = document.getElementById('display-timestamp');
+            displayTimestampCheckbox.checked = config.display_timestamp;
             
             const timeStampScaleSelect = document.getElementById('timestamp-text-size');
             timeStampScaleSelect.value = config.timestamp_scale
@@ -330,6 +331,7 @@ function convertConfigUIStateToJSON(){
     const rotationSelect = document.getElementById('camera-rotation-select');
     const timeStampScaleSelect = document.getElementById('timestamp-text-size');
     const timestampPositionSelect = document.getElementById('timestamp-position-select');
+    const displayTimestampCheckbox = document.getElementById('display-timestamp');
     
     allowed_ip_listing_array = convertStringListToArray( ipTextArea.value )
     if( validateIPArray( allowed_ip_listing_array ) ){
@@ -346,7 +348,8 @@ function convertConfigUIStateToJSON(){
                selected_resolution: getSelectedResolution( 'camera-resolutions-select' ),
                image_rotation: Number(rotationSelect.value),
                timestamp_scale: timeStampScaleSelect.value,
-               timestamp_position: timestampPositionSelect.value
+               timestamp_position: timestampPositionSelect.value,
+               display_timestamp: displayTimestampCheckbox.checked
         };
         return postObject;
         
@@ -416,7 +419,6 @@ function setInitialPassword(username, password) {
     return setPass(username, password, 'admin', challenge);
   }).then(result => {
     if( result && result.error == false ){
-        console.log("Password set.")
         setWindowVisibilityState();
     }else{
         console.log("Password set error:"+result.message)
@@ -451,7 +453,6 @@ function changeCurrentUserPassword(  ) {
   }).then(result => {
     changePassButton.disabled = false;
     if( result && result.error == false ){
-        console.log("Password set.")
         elementVisibleOnTimer( statusIcon )
     }else{
         passChangeInfoSpan.textContent = "Error:"+result.message;
@@ -486,7 +487,6 @@ function login( username, password ){
                 if (response.ok) {
                     if( jsonData.pass_OK === true ){
                         loginUsernameText.value = '';
-                        console.log("Login successful");
                         message.textContent = "";
                         setWindowVisibilityState();
                     }
@@ -555,12 +555,17 @@ function generateUserListTable(data, current_username, divId) {
             const button = document.createElement('button');
             button.textContent = 'Delete';
             button.style.marginLeft = '5px';
-            button.addEventListener('click', () => {
-                lockUnlockDelete( user_data.username, 'delete' ).then ( () => {
-                            console.log("Deleted user");
-                            resetConfigOnUI();
-                });
-            });
+            button.addEventListener('click', 
+                () => {
+                    showModal( "Delete user?", 
+                                () => {
+                                lockUnlockDelete( user_data.username, 'delete' ).then ( () => {
+                                            resetConfigOnUI() })
+                                }
+                            )
+                    }
+            );
+            
             cell.appendChild(button);
           }
           
@@ -570,7 +575,6 @@ function generateUserListTable(data, current_username, divId) {
             button.style.marginLeft = '5px';
             button.addEventListener('click', () => {
                 logout( whichUser=user_data.username ).then ( () => {
-                    console.log("logged out");
                     resetConfigOnUI()
                 });
             });
@@ -585,7 +589,6 @@ function generateUserListTable(data, current_username, divId) {
                     button.textContent = 'Unlock';
                     button.addEventListener('click', () => {
                         lockUnlockDelete( user_data.username, 'unlock' ).then ( () => {
-                            console.log("unlocked");
                             resetConfigOnUI();
                         });
                     });
@@ -593,7 +596,6 @@ function generateUserListTable(data, current_username, divId) {
                     button.textContent = 'Lock';
                     button.addEventListener('click', () => {
                        lockUnlockDelete( user_data.username, 'lock' ).then ( () => {
-                            console.log("locked");
                             resetConfigOnUI();
                         });
                     });
@@ -646,7 +648,6 @@ function generateAppKeyTable(data, appKeyDiv) {
     button.style.marginLeft = '5px';
     button.addEventListener('click', () => {
         deleteAppKey( appkey ).then ( () => {
-            console.log("Deleted app key");
             resetConfigOnUI();
         });
     });
@@ -819,8 +820,6 @@ function getLogData( before_id = null ) {
   if( before_id != null ){
     url = getLogsURL+'?from='+before_id
   }
-  console.log(before_id)
-  console.log(url)
   
   return new Promise((resolve, reject) => {
     fetch(url)
@@ -878,6 +877,7 @@ function addEventListeners() {
     
     /* Hamburger config menu handler */
     document.getElementById('hamburger-menu').addEventListener('click', function() {
+        resetConfigOnUI();
         document.getElementById('configuration-window').style.display = 'block';
     });
 
@@ -894,7 +894,6 @@ function addEventListeners() {
     //after being on another page
 	window.addEventListener('pageshow', function(event) {
     if (document.visibilityState === 'visible') {
-            console.log("restart video")
             const div = document.getElementById('video-container');
             if (div.style.display !== 'none'){
                 restartVideoFeed()
@@ -905,7 +904,6 @@ function addEventListeners() {
     // Restart the video if the page becomes visible after previously being hidden
     document.addEventListener('visibilitychange', function() {
             if (document.visibilityState === 'visible') {
-                console.log("restart video"+ new Date().getTime())
                 const div = document.getElementById('video-container');
                 if (div.style.display !== 'none'){
                     restartVideoFeed()
@@ -917,9 +915,9 @@ function addEventListeners() {
                     // Need to set the video src to blank to disconnect the video
                     // Removing the video element is not sufficient. It keeps downloading
                     // in the backgroud
-                    videoImg.src=""
+                    videoImg.onerror = null;
+                    videoImg.src="";
                     videoImg.remove();
-                    console.log("video dropped:"+ new Date().getTime());
                 }
             }
      });
@@ -927,20 +925,46 @@ function addEventListeners() {
 
 function restartVideoFeed() {                
         // Create an img element
-        const img = document.createElement('img');
-        // Even though anti-caching headers are set, it still caches sometimes
-        // This tries to force no caching by changing the URL
-        img.src = videoURL+'?nocache=' + new Date().getTime();
-        img.id = "video-feed"
-        
+                
         // Append the img element to the video container
         const videoContainer = document.getElementById('video-container')
+        
+        // Remove the existing video element if it exists
         const vfIMGElement = document.getElementById('video-feed');
         if(vfIMGElement){
+            vfIMGElement.onerror = null;
             vfIMGElement.src="";
             vfIMGElement.remove();
         }
-
+        
+        const img = document.createElement('img');
+        // Even though anti-caching headers are set, it still caches sometimes
+        // This tries to force no caching by changing the URL
+        videoContainer.innerHTML=''
+        img.src = videoURL+'?nocache=' + new Date().getTime();
+        img.id = "video-feed"
+        
+        //If the video image cannot be displayed, then print an error instead
+        img.onerror = function() {
+            console.log("Cannot start video")
+            
+            const vfIMGElement = document.getElementById('video-feed');
+            if(vfIMGElement){
+                vfIMGElement.onerror = null;
+                vfIMGElement.src="";
+                vfIMGElement.remove();
+            }
+            
+            const videoContainer = document.getElementById('video-container')
+            videoContainer.innerHTML=''
+            
+            var errorSpan = document.createElement('span');
+            errorSpan.textContent = "Error: Unable to contact camera. Check network and refresh."
+            errorSpan.setAttribute('id', 'video-error-span');
+            errorSpan.style.color = 'white';
+            videoContainer.appendChild( errorSpan )
+        }
+        
         videoContainer.appendChild(img);
         
 }
@@ -994,7 +1018,7 @@ function elementVisibleOnTimer(imageElement, visibleTime=3000) {
 // Set which window is visible to the user based on the result of the "test-auth-state" REST method call
 // e.g. whether the video should be displayed or whether the user needs to login first
 function setWindowVisibilityState() {
-    const initialMessageWindowDiv = document.getElementById('message-window');
+    const initialMessageWindowDiv = document.getElementById('boot-message-window');
     const initialAdminPassWindowDiv = document.getElementById('set-initial-admin-password-window');
     const loginWindowDiv = document.getElementById('login-window');
     const mainWindowDiv = document.getElementById('main-window');
@@ -1004,7 +1028,6 @@ function setWindowVisibilityState() {
 
     get_auth_state()
     .then( auth_state => {
-        console.log( auth_state )
     
         if(auth_state.auth_state === 'set_initial_password'){
             initialMessageWindowDiv.style.display = 'none';
@@ -1037,8 +1060,6 @@ function setWindowVisibilityState() {
             
             const addUserSectionDiv = document.getElementById('user-management-section');
             const appKeySectionDiv = document.getElementById('app-key-management-section');
-            
-            console.log( auth_state.permissions )
             
             if(auth_state.permissions === 'admin'){
                 // Enable all config options if the user is an admin
@@ -1104,4 +1125,29 @@ function switchConfigPanel(whichPanel) {
         }
 }
 
+function displayClearLogModal(){
+    showModal( "Clear logs?", clearLogs )
+}
 
+// Text to be displayed on the modal dialogue and a callback when the user clicks the OK button
+function showModal(text, onOkCallback) {
+    const modalDialogue = document.getElementById('modal-dialogue-box');
+    const okBtn = document.getElementById('modal-dialogue-ok-button');
+    const cancelBtn = document.getElementById('modal-dialogue-cancel-button');
+    const dialogueText = document.getElementById('modal-dialogue-text');
+    
+    dialogueText.innerHTML = text
+    modalDialogue.style.display = "flex";
+
+    // Set the OK button callback
+    okBtn.onclick = function() {
+        if (onOkCallback) {
+            onOkCallback();
+        }
+        modalDialogue.style.display = "none";
+    }
+    
+    cancelBtn.onclick = function() {
+        modalDialogue.style.display = "none";
+    }
+}

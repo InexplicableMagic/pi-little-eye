@@ -23,7 +23,7 @@
       <p>Login</p>
       <input id="loginUsername" placeholder="user name">
 	  <input type="password" id="loginPassword" placeholder="password">
-	  <button id="loginButton">Authenticate</button>
+	  <button id="loginButton">Login</button>
 	  <p id="loginMessage"></p>
     </div>
     
@@ -32,7 +32,7 @@
             <div id="hamburger-menu" class="hamburger-menu-class">
                 <div class="bar"></div><div class="bar"></div><div class="bar"></div>
             </div>
-            <div id="middle-text">Middle</div> 
+            <div id="middle-text">RPi-SC</div> 
             <button onclick="logout();" id="logout-button">Logout</button>
         </div>
         <div id="video-container">
@@ -67,7 +67,7 @@
         <div id="user-management-panel" >
             <div class="configuaration-section-container">
                 <div id="user-management-section" class="configuration-section" >
-                    <span>Manage Camera Users</span>
+                    <span class="section-title" >Manage Camera Users</span>
                     <div id="user-list-table">
                     </div>
                     <div class="vertical-list">
@@ -84,14 +84,14 @@
                     </div>  
                 </div>
                 <div id="app-key-management-section" class="configuration-section" >
-                    <span>Manage Application Keys</span>
+                    <span class="section-title">Manage Application Keys</span>
                     <div id="app-key-list-table">
                     </div>
                     <button id="generate-app-key-button" onclick="generate_appkey()" >New App Key</button>
                     <span id="appkey-display-span"></span>
                 </div>
                 <div id="change-user-password-section" class="configuration-section" >
-                    <span>Change Current User Password</span>
+                    <span class="section-title">Change Current User Password</span>
                     <div class="vertical-list">
                         <label for="changeOriginalText">Current password:</label>
                         <input class="password-field" type="password" id="change-password-original-pass-field" placeholder="Current password">
@@ -124,6 +124,10 @@
             </div>
             <div id="timestamp-section" class="configuration-section" >
                 <div class="vertical-list">
+                    <div class="side-by-side">
+                        <input type="checkbox" id="display-timestamp" onchange="saveConfig();">
+                        <label for="display-timestamp">Display timestamp</label>
+                    </div>
                     <label for="timestamp-text-size">Timestamp text size:</label>
                     <select id="timestamp-text-size" onchange="saveConfig();">
                         <option value="small">Small</option>
@@ -163,7 +167,7 @@
             <div id="logs-selection-buttons-section">
                 <div id="logs-next-prev-button-area"></div>
                 <div id="logs-clear-button-area">
-                    <button id="clear-logs-button">Clear Logs</button>
+                    <button id="clear-logs-button" onclick="displayClearLogModal();">Clear Logs</button>
                 </div>
             </div>
             <div id="logs-display-section">
@@ -172,11 +176,21 @@
         </div>
           
     </div>
-    <div id="message-window">
+    
+    <div id="boot-message-window">
         <span id="initial-message" class="initial-message-class">Contacting camera...</span>
     </div>
     
-
+    <div id="modal-dialogue-box">
+        <div id="modal-dialogue-content">
+            <div id="modal-dialogue-text-div"><span id="modal-dialogue-text"></span></div>
+            <div id="modal-dialogue-buttons">
+                <button id="modal-dialogue-ok-button">OK</button>
+                <button id="modal-dialogue-cancel-button">Cancel</button>
+            </div>
+        </div>
+    </div>
+    
     <script>var csrfToken = "{{ csrf_token }}";</script>
     <script>addEventListeners();</script>
     <script>setWindowVisibilityState();</script>

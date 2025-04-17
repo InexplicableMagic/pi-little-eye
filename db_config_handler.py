@@ -157,7 +157,7 @@ class DBConfigHandler:
             # Default timestamp text scale multiplier, sets the size of the timestamp text
             self.insert_or_update_parameter( 'timestamp_scale_factor', 'string' , 'medium')
             # Default timestamp text position
-            self.insert_or_update_parameter( 'timestamp_position', 'string' , 'top-left')
+            self.insert_or_update_parameter( 'timestamp_position', 'string' , 'bottom-right')
             # Whether the timestamp should be displayed
             self.insert_or_update_parameter( 'display_timestamp', 'bool', True )
 
@@ -1136,7 +1136,8 @@ class DBConfigHandler:
                         'image_rotation': self.get_parameter_value('image_rotation'),
                         'timestamp_scale': self.get_parameter_value('timestamp_scale_factor'),
                         'display_timestamp': self.get_parameter_value('display_timestamp'),
-                        'timestamp_position': self.get_parameter_value('timestamp_position')
+                        'timestamp_position': self.get_parameter_value('timestamp_position'),
+                        'display_timestamp': self.get_parameter_value('display_timestamp')
                    }
             
         return config_data
@@ -1163,6 +1164,14 @@ class DBConfigHandler:
             if not isinstance( config_object['image_rotation'], int ):
                 return False
             if config_object['image_rotation'] > 270 or config_object['image_rotation'] < 0 or (config_object['image_rotation'] % 90) != 0:
+                return False
+            if 'timestamp_position' not in config_object:
+                return False
+            if not isinstance( config_object['timestamp_position'], str ):
+                return False
+            if 'display_timestamp' not in config_object:
+                return False
+            if not isinstance( config_object['display_timestamp'], bool ):
                 return False
             
             normalised_whitelisted = []
@@ -1201,6 +1210,8 @@ class DBConfigHandler:
                     self.insert_or_update_parameter( 'timestamp_position', 'string' , config_object['timestamp_position'] )
                 if 'timestamp_scale_factor' in  config_object:
                     self.insert_or_update_parameter( 'timestamp_scale_factor', 'string' , config_object['timestamp_scale_factor'] )
+                if 'display_timestamp' in config_object:
+                    self.insert_or_update_parameter( 'display_timestamp', 'bool' , config_object['display_timestamp'] )
     
     def validate_appkey_auth( self, appkey, secret ):
         try:                    
