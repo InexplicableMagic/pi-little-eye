@@ -10,21 +10,21 @@
 </head>
 <body>
     
-    <div id="set-initial-admin-password-window" class="admin-pass-window">
+    <div id="set-initial-admin-password-window" class="password-screen-class">
     	  <p>Set Admin Username and Password</p>
       <input id="setInitialUsername" placeholder="admin user name">
 	  <input type="password" id="setInitialPasswordText1" placeholder="Enter password">
 	  <input type="password" id="setInitialPasswordText2" placeholder="Confirm password">
-	  <p id="setInitialPassMessage"></p>
+	  <p id="setInitialPassMessage" class="warning-message-text"></p>
 	  <button id="setInitialPassButton" disabled>Set Password</button>
     </div>
     
-    <div id="login-window">
+    <div id="login-window" class="password-screen-class">
       <p>Login</p>
       <input id="loginUsername" placeholder="user name">
-	  <input type="password" id="loginPassword" placeholder="password">
+	  <input id="loginPassword" type="password" placeholder="password">
 	  <button id="loginButton">Login</button>
-	  <p id="loginMessage"></p>
+	  <span id="loginMessage" class="warning-message-text"></span>
     </div>
     
     <div id="main-window">
@@ -32,7 +32,7 @@
             <div id="hamburger-menu" class="hamburger-menu-class">
                 <div class="bar"></div><div class="bar"></div><div class="bar"></div>
             </div>
-            <div id="middle-text">RPi-SC</div> 
+            <div id="middle-text">Security Camera</div> 
             <button onclick="logout();" id="logout-button">Logout</button>
         </div>
         <div id="video-container">
@@ -85,10 +85,16 @@
                 </div>
                 <div id="app-key-management-section" class="configuration-section" >
                     <span class="section-title">Manage Application Keys</span>
-                    <div id="app-key-list-table">
-                    </div>
+                    <div id="app-key-list-table"></div>
                     <button id="generate-app-key-button" onclick="generate_appkey()" >New App Key</button>
-                    <span id="appkey-display-span"></span>
+                    <div id="new-app-key-display-area" class="vertical-list">
+                        <table>
+                            <tr><td><span class="bold-text">AppKey</span></td><td><span id="new-appkey-display-span" class="monospace-text"></span></td></tr>
+                            <tr><td><span class="bold-text">Secret</span></td><td><span id="new-secret-display-span" class="monospace-text"></span></td></tr>
+                        </table>
+                        <span class="warning-message-text">&#9888;The secret is displayed only once<span>
+                    </div>
+                    
                 </div>
                 <div id="change-user-password-section" class="configuration-section" >
                     <span class="section-title">Change Current User Password</span>
@@ -150,15 +156,22 @@
                 <div class="vertical-list">
                     <div class="side-by-side">
                         <input type="radio" id="any-ip-radio" name="ips-allowed" value="any-ip" checked>
-                        <label for="any-ip-radio">Any IP can access camera</label>
+                        <label for="any-ip-radio">Any IP may access camera (except blocked)</label>
                     </div>
                     <div class="side-by-side">
                         <input type="radio" id="allowed-ips-radio" name="ips-allowed" value="allowed-ips">
-                        <label for="allowed-ips-radio">Only below IP ranges can access camera</label>
+                        <label for="allowed-ips-radio">Only below IP ranges may access camera</label>
                     </div>
-                    <label for="allowed-ip-list">List of allowed IP ranges:</label>
-                    <textarea id="allowed-ip-list" name="allowed-ip-list" placeholder="192.168.*" rows="4" cols="25"></textarea>
-                    <button onclick="saveConfig();" id="config-save-changes-button">Save Changes</button>
+                    <label for="allowed-ip-list">Below IP ranges may access camera:</label>
+                    <textarea id="allowed-ip-list" name="allowed-ip-list" placeholder="192.168.*" rows="6" cols="25"></textarea>
+                    
+                    <div class="side-by-side">
+                        <input type="checkbox" id="enable-blocklist-checkbox">
+                        <label for="enable-blocklist-checkbox">Enable IP block list</label>
+                    </div>
+                    <label for="blocked-ip-list">Below IP ranges are blocked:</label>
+                    <textarea id="blocked-ip-list" name="blocked-ip-list" placeholder="1.1.1.*" rows="6" cols="25"></textarea>
+                    <button onclick="saveIPChangesConfig();" id="save-ip-config-button">Save Changes</button>
                 </div>
             </div>
         </div>

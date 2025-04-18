@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 import sqlite3
 import uuid
 import re
+import os
 import string
 import random
 import bcrypt
@@ -22,26 +23,36 @@ class DBConfigHandler:
     IPV4_WILDCARD_PATTERN = r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$|^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){0,3}\*$'
     IPV6_WILDCARD_PATTERN = r'^(?:(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|(?:(?:[a-fA-F\d]{1,4})\:){0,7}(?:\*|(?:[a-fA-F\d]{1,3})\*))$'
     
-    def __init__(self, db_path):
+    def __init__(self, db_path, factory_reset):
         self.db_path = db_path
-        self.initialize_database()
+        
+        # On factory reset, delete the existing database and then recreate it
+        if factory_reset:
+            if os.path.exists(self.db_path):
+                os.remove(self.db_path)
+        
+        self.initialise_database()
         
         self.delete_old_log_lines()                
         self.next_log_line_delete_time = int(time.time()) + 86400
         self.config_change_lock = threading.Lock()
-
         
+        if factory_reset:
+            self.write_log_line( 'warning', True, '','', 'factory_reset', 'Factory reset via command line' )
+                
     def read_only_connection(self):
         return sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True)
         
-    def initialize_database(self):
+    def initialise_database(self):
         # Create the database if it doesn't exist
+        
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
         # Authentication table - stores usernames and passwords of camera users
         # disabled - whether the account is locked
         # bad_pass_attempts - number of consecutive failed login attempts for this account
+                
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS authentication (
                 username TEXT PRIMARY KEY NOT NULL UNIQUE,
@@ -138,8 +149,9 @@ class DBConfigHandler:
         if self.is_parameters_table_empty():
             # Initial authentication state requires a password to be set
             self.insert_or_update_parameter( 'auth_state', 'string', 'nopass' )
-            # Enforce an initial IP whitelist for local IPs only until the user has has time to set the password
-            self.insert_or_update_parameter( 'enforce_ip_whitelist', 'bool', False )
+            # Disable enforcement of IP whitelist and blocklist by default
+            self.disable_ip_whitelist_and_blocklist()
+            # Set the initial IP whitelist and blocklist
             self.set_ip_allow_list( [ '192.168.*', '10.*', '172.16.*', 'fc*', 'fd*', '127.0.0.1' ], [] )
             # Expire user login sessions initially after 30 days - forces password re-entry after this number of days
             self.insert_or_update_parameter( 'max_session_age', 'int', 30 )
@@ -166,7 +178,13 @@ class DBConfigHandler:
         self.ip_white_list = ip_lists['whitelisted']
         self.ip_black_list = ip_lists['blacklisted']
         self.enforce_ip_whitelist = self.get_parameter_value('enforce_ip_whitelist')
-        
+        self.enforce_ip_blocklist = self.get_parameter_value('enforce_ip_blocklist')
+    
+    def disable_ip_whitelist_and_blocklist( self ):
+        self.insert_or_update_parameter( 'enforce_ip_whitelist', 'bool', False )
+        self.insert_or_update_parameter( 'enforce_ip_blocklist', 'bool', False )
+        self.enforce_ip_whitelist = self.get_parameter_value('enforce_ip_whitelist')
+        self.enforce_ip_blocklist = self.get_parameter_value('enforce_ip_blocklist')
      
     def write_log_line( self, level, alert, username, ip_route, log_type, message ):
         
@@ -364,9 +382,10 @@ class DBConfigHandler:
     def is_ip_list_allowed( self, ip_list_to_check ):
     
             if len( self.ip_black_list ) > 0:
-                for ip in ip_list_to_check:
-                    if DBConfigHandler.ip_matches_wildcard_list( ip, self.ip_black_list ):
-                        return False
+                if self.enforce_ip_blocklist:
+                    for ip in ip_list_to_check:
+                        if DBConfigHandler.ip_matches_wildcard_list( ip, self.ip_black_list ):
+                            return False
             if len( self.ip_white_list ) > 0:
                 if self.enforce_ip_whitelist:
                     for ip in ip_list_to_check:
@@ -920,9 +939,8 @@ class DBConfigHandler:
             
             max_cookie_session_age_s = int( self.get_parameter_value('max_session_age') ) * 86400
             
-            # TODO: set Secure=True when HTTPS
-            response.set_cookie( 'auth_token', auth_token, max_age=max_cookie_session_age_s, httponly=True, secure=False, samesite='Strict' )
-            response.set_cookie( 'session_id', session_id, max_age=max_cookie_session_age_s, httponly=True, secure=False, samesite='Strict' )
+            response.set_cookie( 'auth_token', auth_token, max_age=max_cookie_session_age_s, httponly=True, secure=True, samesite='Strict' )
+            response.set_cookie( 'session_id', session_id, max_age=max_cookie_session_age_s, httponly=True, secure=True, samesite='Strict' )
         else:
             raise ValueError( "Username is invalid" )
 
@@ -1131,6 +1149,7 @@ class DBConfigHandler:
                         'error': False, 
                         'allowed_ips': list_of_allowed_ips,
                         'enforce_ip_whitelist': self.get_parameter_value('enforce_ip_whitelist'),
+                        'enforce_ip_blocklist': self.get_parameter_value('enforce_ip_blocklist'),
                         'usernames' : self.list_all_usernames(),
                         'app_keys' : self.list_all_app_keys(),
                         'image_rotation': self.get_parameter_value('image_rotation'),
@@ -1144,7 +1163,7 @@ class DBConfigHandler:
 
     def validate_config_object( config_object ):
         if config_object:
-            keys = [ 'allowed_ips', 'enforce_ip_whitelist' ]
+            keys = [ 'allowed_ips', 'enforce_ip_whitelist', 'enforce_ip_blocklist', 'image_rotation', 'timestamp_position', 'display_timestamp' ]
             for key in keys:
                 if key not in config_object:
                     return False
@@ -1158,18 +1177,13 @@ class DBConfigHandler:
                 return False
             if not isinstance(config_object['enforce_ip_whitelist'], bool):
                 return False
-                
-            if 'image_rotation' not in config_object:
+            if not isinstance(config_object['enforce_ip_blocklist'], bool):
                 return False
             if not isinstance( config_object['image_rotation'], int ):
                 return False
             if config_object['image_rotation'] > 270 or config_object['image_rotation'] < 0 or (config_object['image_rotation'] % 90) != 0:
                 return False
-            if 'timestamp_position' not in config_object:
-                return False
             if not isinstance( config_object['timestamp_position'], str ):
-                return False
-            if 'display_timestamp' not in config_object:
                 return False
             if not isinstance( config_object['display_timestamp'], bool ):
                 return False
@@ -1202,14 +1216,18 @@ class DBConfigHandler:
                     self.insert_or_update_parameter( 'enforce_ip_whitelist', 'bool', config_object['enforce_ip_whitelist'] )
                     self.enforce_ip_whitelist = config_object['enforce_ip_whitelist']
                 
+                if 'enforce_ip_blocklist' in config_object:
+                    self.insert_or_update_parameter( 'enforce_ip_blocklist', 'bool', config_object['enforce_ip_blocklist'] )
+                    self.enforce_ip_blocklist = config_object['enforce_ip_blocklist']
+                
                 if 'image_rotation' in config_object:
                     self.insert_or_update_parameter( 'image_rotation', 'int', config_object['image_rotation'] )
                 if 'display_timestamp' in config_object:
                     self.insert_or_update_parameter( 'display_timestamp', 'bool', config_object['display_timestamp'] )
                 if 'timestamp_position' in config_object:
                     self.insert_or_update_parameter( 'timestamp_position', 'string' , config_object['timestamp_position'] )
-                if 'timestamp_scale_factor' in  config_object:
-                    self.insert_or_update_parameter( 'timestamp_scale_factor', 'string' , config_object['timestamp_scale_factor'] )
+                if 'timestamp_scale' in  config_object:
+                    self.insert_or_update_parameter( 'timestamp_scale_factor', 'string' , config_object['timestamp_scale'] )
                 if 'display_timestamp' in config_object:
                     self.insert_or_update_parameter( 'display_timestamp', 'bool' , config_object['display_timestamp'] )
     

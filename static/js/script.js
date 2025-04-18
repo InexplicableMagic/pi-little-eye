@@ -15,6 +15,9 @@ const manageLogsURL = '/api/v1/log-management';
 
 const userTableID = 'user-table'
 
+let lastValidIPAllowList='';
+let lastValidIPBlockList='';
+
 //TODO: Check cookies are enabled and message the user if not
 function verifyCookiesEnabled() {
     if (navigator.cookieEnabled) return true;
@@ -219,7 +222,7 @@ function logout( whichUser = null ){
   }).then(response => {
     if (!response.ok) {
       console.log(response)
-      throw new Error('Network error returned from logout');
+      console.log('Network error returned from logout');
     }
     setWindowVisibilityState();
     return response.json();
@@ -266,13 +269,25 @@ function resetConfigOnUI(){
     .then( config => {
         if(config && 'error' in config && config.error === false) {
             const ipStringWhitelist = config.allowed_ips.whitelisted.join('\n');
-            const ipTextArea = document.getElementById('allowed-ip-list');
-            ipTextArea.value = ipStringWhitelist;
+            const ipStringBlocklist = config.allowed_ips.blacklisted.join('\n');
+            
+            lastValidIPAllowList = ipStringWhitelist;
+            lastValidIPBlockList = ipStringBlocklist;
+            
+            const ipWhitelistTextArea = document.getElementById('allowed-ip-list');
+            const ipBlocklistTextArea = document.getElementById('blocked-ip-list');
+            
+            ipWhitelistTextArea.value = ipStringWhitelist;
             if(config.enforce_ip_whitelist === true){
                 document.getElementById('allowed-ips-radio').checked = true;
             }else{
                 document.getElementById('any-ip-radio').checked = true;
             }
+            
+            document.getElementById('enable-blocklist-checkbox').checked = config.enforce_ip_blocklist
+            
+            ipBlocklistTextArea.value = ipStringBlocklist;
+            
             const rotationSelect = document.getElementById('camera-rotation-select');
             rotationSelect.value = config.image_rotation;
             
@@ -311,10 +326,13 @@ function convertStringListToArray( text ){
 
 function validationFeedbackIPTextArea(textArea) {
   const isValid = validateIPArray(convertStringListToArray( textArea.value ));
+  const saveIPConfigButton = document.getElementById('save-ip-config-button');
   if (!isValid) {
     textArea.style.border = '4px solid red';
+    saveIPConfigButton.disabled = true;
   } else {
     textArea.style.border = ''; // Reset to default
+    saveIPConfigButton.disabled = false;
   }  
 }
 
@@ -327,24 +345,31 @@ function setupTextAreaValidation(textAreaId) {
 }
 
 function convertConfigUIStateToJSON(){
-    const ipTextArea = document.getElementById('allowed-ip-list');
+    const ipWhitelistTextArea = document.getElementById('allowed-ip-list');
+    const ipBlocklistTextArea = document.getElementById('blocked-ip-list');
     const rotationSelect = document.getElementById('camera-rotation-select');
     const timeStampScaleSelect = document.getElementById('timestamp-text-size');
     const timestampPositionSelect = document.getElementById('timestamp-position-select');
     const displayTimestampCheckbox = document.getElementById('display-timestamp');
     
-    allowed_ip_listing_array = convertStringListToArray( ipTextArea.value )
-    if( validateIPArray( allowed_ip_listing_array ) ){
+    allowed_ip_listing_array = convertStringListToArray( lastValidIPAllowList )
+    blocked_ip_listing_array = convertStringListToArray( lastValidIPBlockList )
+    
+    if( validateIPArray( allowed_ip_listing_array ) && validateIPArray( blocked_ip_listing_array ) ){
         enforce_whitelisted_ips = true
         if(document.getElementById('any-ip-radio').checked)
             enforce_whitelisted_ips = false
+            
+        enforce_blocklist_ips = document.getElementById('enable-blocklist-checkbox').checked
+        
         const postObject = {
                csrf_token: csrfToken,
                allowed_ips: {
                 whitelisted: allowed_ip_listing_array,
-                blacklisted: []
+                blacklisted: blocked_ip_listing_array
                },
                enforce_ip_whitelist: enforce_whitelisted_ips,
+               enforce_ip_blocklist: enforce_blocklist_ips,
                selected_resolution: getSelectedResolution( 'camera-resolutions-select' ),
                image_rotation: Number(rotationSelect.value),
                timestamp_scale: timeStampScaleSelect.value,
@@ -639,7 +664,11 @@ function generateAppKeyTable(data, appKeyDiv) {
   data.forEach(appkey => {
     const row = tbody.insertRow();
     const cell = row.insertCell();
-    cell.textContent = appkey;
+    
+    var keySpan = document.createElement('span');
+    keySpan.className = 'monospace-text';
+    keySpan.textContent = appkey 
+    cell.appendChild( keySpan );
     cell.style.border = '1px solid black';
     cell.style.padding = '5px';
     
@@ -704,10 +733,10 @@ function convertLogDataToHTMLTable( log_data ){
 
     const column_ordering = [
         { key:'Datestamp', col_num: 1 },
-        { key:'Level', col_num: 2 },
         { key:'Username', col_num: 4 },
         { key:'IP', col_num: 5 },
-        { key:'Message', col_num: 7 }
+        { key:'Message', col_num: 7 },
+        { key:'Level', col_num: 2 }
      ]
     
     // Create Table
@@ -800,8 +829,13 @@ function generate_appkey(){
         }).then(data => {
             return data.json().then(jsonData => {
                 if(jsonData.error === false){
-                    const appkeydisplay = document.getElementById('appkey-display-span');
-                    appkeydisplay.innerHTML = 'Key: '+jsonData.appkey + ' secret: '+jsonData.secret
+                    const appkeydisplay = document.getElementById('new-appkey-display-span');
+                    const secretdisplay = document.getElementById('new-secret-display-span');
+                    appkeydisplay.innerHTML = jsonData.appkey
+                    secretdisplay.innerHTML = jsonData.secret
+                    showAppKeyDisplayArea(true);
+                    resetConfigOnUI();
+                    
                 }else{
                     console.log( jsonData )
                 }
@@ -867,6 +901,10 @@ function addEventListeners() {
     changePasswordPassword2.addEventListener('input', () => checkPasswordsMatch('change-password-newpass-field', 'change-password-verify-field', 'password-change-info', 'change-user-pass-button', originalPassfield='change-password-original-pass-field' ) );
 	changePasswordOriginal.addEventListener('input', () => checkPasswordsMatch('change-password-newpass-field', 'change-password-verify-field', 'password-change-info', 'change-user-pass-button', originalPassfield='change-password-original-pass-field' ) );
 	
+	//Enable button on login screen when user/pass filled in
+	loginUsername.addEventListener('input', () => checkUserPassFilledIn( 'loginUsername', 'loginPassword', 'loginButton' ) );
+	loginPassword.addEventListener('input', () => checkUserPassFilledIn( 'loginUsername', 'loginPassword', 'loginButton' ) );
+	
 	//Enable button and provide feedback when adding a new user account in the config
 	addNewUserField.addEventListener('input', () => checkUserPassFilledIn( 'new-username-field', 'new-user-password-field', 'add-new-user-button' ) );
 	addNewUserPassField.addEventListener('input', () => checkUserPassFilledIn( 'new-username-field', 'new-user-password-field', 'add-new-user-button' ) );
@@ -879,6 +917,7 @@ function addEventListeners() {
     document.getElementById('hamburger-menu').addEventListener('click', function() {
         resetConfigOnUI();
         document.getElementById('configuration-window').style.display = 'block';
+        showAppKeyDisplayArea(false);
     });
 
     document.getElementById('close-config-button').addEventListener('click', function() {
@@ -887,6 +926,10 @@ function addEventListeners() {
     
     document.addEventListener('DOMContentLoaded', function() {
         setupTextAreaValidation('allowed-ip-list');
+    });
+
+    document.addEventListener('DOMContentLoaded', function() {
+        setupTextAreaValidation('blocked-ip-list');
     });
 
     //Attempt to start the video feed if the video DIV is visible
@@ -969,6 +1012,16 @@ function restartVideoFeed() {
         
 }
 
+function saveIPChangesConfig(){
+    const allowedIPTextArea = document.getElementById('allowed-ip-list')
+    const blockedIPTextArea = document.getElementById('blocked-ip-list')
+    
+    lastValidIPAllowList = allowedIPTextArea.value;
+    lastValidIPBlockList = blockedIPTextArea.value;
+    
+    saveConfig();    
+}
+
 // Determine if the user is authenticated - used to choose which window to display
 function get_auth_state(){
 
@@ -1028,7 +1081,7 @@ function setWindowVisibilityState() {
 
     get_auth_state()
     .then( auth_state => {
-    
+        
         if(auth_state.auth_state === 'set_initial_password'){
             initialMessageWindowDiv.style.display = 'none';
             initialAdminPassWindowDiv.style.display = 'block';
@@ -1151,3 +1204,18 @@ function showModal(text, onOkCallback) {
         modalDialogue.style.display = "none";
     }
 }
+
+// Show the area that displays a new app key and secret after creation
+function showAppKeyDisplayArea( show ){
+    const appKeyDisplayArea = document.getElementById('new-app-key-display-area');
+    if(show){
+        appKeyDisplayArea.style.display = 'block';
+    }else{
+        
+        appKeyDisplayArea.style.display = 'none';
+        const appKeyText = document.getElementById('new-appkey-display-span');
+        const secretText = document.getElementById('new-secret-display-span');
+        appKeyText.innerHTML='';
+        secretText.innerHTML='';
+    }
+} 

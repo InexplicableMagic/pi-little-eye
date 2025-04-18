@@ -4,7 +4,10 @@ from flask import Flask, Response, request, render_template, jsonify, make_respo
 from gevent import pywsgi
 from db_config_handler import *
 from camera_handler import *
+from certificate_handler import *
 import uuid
+import argparse
+import ssl
 
 app = Flask(__name__)
 
@@ -29,6 +32,21 @@ def limit_content_length(f):
             abort(413)
         return f(*args, **kwargs)
     return wrapper_function
+    
+# Suppress warnings being printed to the terminal due to using a self-sign certificate
+# These errors come up when the user is informed in the browser the cert is self-signed
+# and the browser interrupts the connection
+def suppress_bad_certificate_errors(context, type, value, tb):
+    if type is ssl.SSLError and (
+        "sslv3 alert bad certificate" in str(value).lower() or
+        "eof occurred in violation of protocol" in str(value).lower()
+    ):
+        return  # Suppress this specific error
+    if type is ssl.SSLEOFError:
+        return  # Suppress this error as well
+    # Call the original handler for all other errors
+    original_error_handler(context, type, value, tb)
+
 
 # Look in the request and various headers for the client's IP address
 # Might be multiple addresses if behind a proxy
@@ -168,7 +186,7 @@ def test_auth_state():
                 response = make_response( jsonify ( { 'error': True, 'message': 'Challenge parameter not set in POST data.' } ), 400 )
     else:
         # IP Blocked   
-        response = make_response( jsonify( {'auth-state': 'access_denied'} ), 200 )
+        response = make_response( jsonify( {'auth_state': 'access_denied'} ), 200 )
 
     return response
 
@@ -614,21 +632,43 @@ def index():
         csrf_token = str(uuid.uuid4())
 
     response = make_response(render_template('index.html', csrf_token=csrf_token))
-    # TODO: set Secure=True when HTTPS
     if 'csrf_token' not in request.cookies:
-        response.set_cookie('csrf_token', csrf_token, httponly=True, secure=False, samesite='Strict')
-    log_entry( 'info', 'index_page', 'Camera front page accessed' )
+        response.set_cookie('csrf_token', csrf_token, httponly=True, secure=True, samesite='Strict')
+    log_entry( 'info', 'index_page', 'Front page accessed' )
     return response
 
 
 if __name__ == '__main__':
+        
+    parser = argparse.ArgumentParser(description="Raspberry Pi Security Camera")
+    # Add the arguments
+    parser.add_argument('--host', type=str, default='0.0.0.0', help='Host address to bind to (default: 0.0.0.0)')
+    parser.add_argument('--port', type=int, default=5000, help='Port number to bind to (default: 5000)')
+    parser.add_argument('--disable-ip-lists', action='store_true', help='Disable IP white list and block list - use if you have accidentally blocked your own IP')
+    parser.add_argument('--factory-reset', action='store_true', help='Reset to factory defaults - use e.g. if you have forgotten the admin password')
+
+    # Parse the arguments
+    args = parser.parse_args()
     
-    dbch = DBConfigHandler("security_cam_state.sqlite")
+    dbch = DBConfigHandler("security_cam_state.sqlite", args.factory_reset)
     ch = CameraHandler( dbch )
-    dbch.write_log_line( 'info', False, '','', 'software_started', 'Security camera software was started' )
+    dbch.write_log_line( 'info', False, '','', 'software_started', 'Software started' )
     
-    # TODO: Add keyfile and certfile
-    http_server = pywsgi.WSGIServer( ('0.0.0.0', 5000), app )
+    
+    if args.disable_ip_lists:
+        self.write_log_line( 'warning', True, '','', 'ip_disable', 'IP whitelist/blocklist disabled via command line' )
+        dbch.disable_ip_whitelist_and_blocklist()
+    
+    # Suppress self-sign certificate warnings
+    original_error_handler = gevent.get_hub().handle_error
+    gevent.get_hub().handle_error = suppress_bad_certificate_errors
+    
+    # Generate a self-sign HTTPS certificate so the user doesn't have to supply one
+    CertificateHandler.update_tls_certificates()
+    keyfile = CertificateHandler.get_key_file_path()
+    certfile = CertificateHandler.get_cert_file_path()
+    
+    http_server = pywsgi.WSGIServer( (args.host, args.port), app, keyfile=keyfile, certfile=certfile )
     http_server.serve_forever()
 
 
