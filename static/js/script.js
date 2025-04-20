@@ -224,7 +224,15 @@ function logout( whichUser = null ){
       console.log(response)
       console.log('Network error returned from logout');
     }
+    // Should display the login screen
     setWindowVisibilityState();
+    // Disconnect the video feed which may still be running behind the scenes
+    const vfIMGElement = document.getElementById('video-feed');
+    if(vfIMGElement){
+        vfIMGElement.onerror = null;
+        vfIMGElement.src="";
+        vfIMGElement.remove();
+    }
     return response.json();
   });
 }
@@ -937,7 +945,7 @@ function addEventListeners() {
     //after being on another page
 	window.addEventListener('pageshow', function(event) {
     if (document.visibilityState === 'visible') {
-            const div = document.getElementById('video-container');
+            const div = document.getElementById('main-window');
             if (div.style.display !== 'none'){
                 restartVideoFeed()
             }
@@ -947,7 +955,7 @@ function addEventListeners() {
     // Restart the video if the page becomes visible after previously being hidden
     document.addEventListener('visibilitychange', function() {
             if (document.visibilityState === 'visible') {
-                const div = document.getElementById('video-container');
+                const div = document.getElementById('main-window');
                 if (div.style.display !== 'none'){
                     restartVideoFeed()
                 }
