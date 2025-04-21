@@ -33,17 +33,21 @@ def limit_content_length(f):
         return f(*args, **kwargs)
     return wrapper_function
     
-# Suppress warnings being printed to the terminal due to using the self-sign certificate usage
+# Suppress exeptions being printed to the terminal due to using the self-sign certificate usage
 # These errors come up when the user is informed in the browser the cert is self-signed
 # and the browser interrupts the connection
 def suppress_bad_certificate_errors(context, type, value, tb):
+    msg_lower = str(value).lower()
     if type is ssl.SSLError and (
-        "sslv3 alert bad certificate" in str(value).lower() or
-        "eof occurred in violation of protocol" in str(value).lower()
+        "sslv3 alert bad certificate" in msg_lower or
+        "alert certificate unknown" in msg_lower or
+        "eof occurred in violation of protocol" in msg_lower or 
+        "http request" in msg_lower
     ):
-        return  # Suppress this specific error
+        return  # Suppress error
     if type is ssl.SSLEOFError:
         return  # Suppress this error as well
+        
     # Call the original handler for all other errors
     original_error_handler(context, type, value, tb)
 
@@ -660,14 +664,16 @@ if __name__ == '__main__':
     ch = CameraHandler( dbch )
     dbch.write_log_line( 'info', False, '','', 'software_started', 'Software started' )
         
+    # Option to enable access if the user has locked themselves out due to incorrect IP whitelist settings
     if args.disable_ip_lists:
         self.write_log_line( 'warning', True, '','', 'ip_disable', 'IP whitelist/blocklist disabled via command line' )
         dbch.disable_ip_whitelist_and_blocklist()
     
-    # Suppress self-sign certificate warnings
+    # Suppress exceptions caused by self-sign certificate usage being printed to the terminal
     original_error_handler = gevent.get_hub().handle_error
     gevent.get_hub().handle_error = suppress_bad_certificate_errors
     
+    # User supplies their own certificate option
     if args.certificate and args.key:
         # User supplied certificate and key
         keyfile = args.key

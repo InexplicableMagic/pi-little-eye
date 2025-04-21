@@ -1,5 +1,6 @@
 <img align="right" width="250px" src="docs/security-camera-with-raspberry.jpg">
-A security camera for the Raspberry Pi using the official camera modules.<br><br>
+
+**piLittleEye** is a security camera for the Raspberry Pi using the official camera modules.<br>
 
 - Viewable on all devices with a browser.
 - No app required. All phones supported.
@@ -9,8 +10,9 @@ A security camera for the Raspberry Pi using the official camera modules.<br><br
 - Supports multiple user accounts
 - Supports IP whitelists and block lists
 - Runs over https
+- Maintains access logs
 
-# Installation
+## Installation
 
 These instructions are for the regular version of the Raspberry Pi OS 64-bit bookworm edition upwards. 
 
@@ -29,7 +31,7 @@ pip install -r requirements.txt
 
 The ```--system-site-packages``` option permits use of Python modules installed system-wide outside of the venv. This is particularly for the picamera2 module which should be installed by default in bookworm and does not seem to install particularly easily into a venv.
 
-# Starting the Camera
+## Starting the Camera
 
 To start the camera:
 
@@ -51,7 +53,7 @@ To start the camera in the background you can do ```nohup ./camera_server.py &``
 The default host interface is ```0.0.0.0``` which is for access from any IPv4 network interface and should be fine for most purposes. However, if you want to start the camera on the IPv6 interface it can be achieved with this option: ```--host ::```
 
 
-# Usage
+## Usage
 
 On first connection, you will be asked to set the initial admin username and password for the camera:
 
@@ -61,7 +63,7 @@ Then login and the camera image should be displayed.
 
 There is a hamburger menu in the upper left corner for options.
 
-## Streaming Video
+### Streaming Video
 
 To stream the video to another device, first you need to make an application key to authenticate with the camera. This can be found in the account settings in the options:
 
@@ -71,7 +73,7 @@ The video is available in MJPEG format at the endpoint: ```/api/v1/video/mjpeg``
 
 ```curl -k -s "https://your-raspberry-pi:5220/api/v1/video/mjpeg?appkey=THE-APP-KEY&secret=THE-SECRET" | ffmpeg -i - -vcodec copy output.mp4```
 
-MPJEG is quite large. If you prefer, you can compress the video into e.g. H.264 (one of the most common video codecs) on the fly like this which will produce a smaller file size. The disadvantage is this will consume a fairly large amount of CPU resource to do the compression whereas storing the original MJPEG requires almost no CPU. If you're trying to do the compression on a raspberry pi, you may find it struggles:
+MPJEG video files can be quite large. If you prefer, you can compress the video into e.g. H.264 (one of the most common video codecs) on the fly like this which will produce a smaller file size. The disadvantage is this will consume a fairly large amount of CPU resource to do the compression whereas storing the original MJPEG requires almost no CPU.
 
 ```curl -k -s "https://your-raspberry-pi:5220/api/v1/video/mjpeg?appkey=THE-APP-KEY&secret=THE-SECRET" | ffmpeg -i - -vcodec libx264 output-compressed.mp4```
 
