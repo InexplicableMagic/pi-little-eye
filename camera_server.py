@@ -2,9 +2,9 @@
 
 from flask import Flask, Response, request, render_template, jsonify, make_response, send_from_directory, abort
 from gevent import pywsgi
-from db_config_handler import *
-from camera_handler import *
-from certificate_handler import *
+from pi_little_eye.db_config_handler import *
+from pi_little_eye.camera_handler import *
+from pi_little_eye.certificate_handler import *
 import uuid
 import argparse
 import ssl

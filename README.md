@@ -22,7 +22,7 @@ To install into a Python virtual env:
 
 ```
 git clone https://github.com/InexplicableMagic/pi-little-eye/
-cd raspberry-pi-security-camera
+cd pi-little-eye
 
 python -m venv camera-env --system-site-packages
 source camera-env/bin/activate
