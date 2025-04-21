@@ -12,7 +12,7 @@ import os
 import gc
 import gevent
 
-from db_config_handler import *
+from .db_config_handler import *
 
 class CameraHandler:
 
