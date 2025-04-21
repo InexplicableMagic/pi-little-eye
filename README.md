@@ -12,6 +12,14 @@ An open source security camera for the Raspberry Pi using the official camera mo
 
 # Installation
 
+To install into a Python virtual env:
+
+```
+python -m venv camera-env --system-site-packages
+source camera-env/bin/activate
+pip install -r requirements.txt
+```
+
 # Usage
 
 
