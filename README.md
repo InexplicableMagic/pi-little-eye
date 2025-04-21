@@ -42,12 +42,6 @@ source camera-env/bin/activate
 
 This will start the camera on port 5220 by default. You can change the port with the ```--port``` option.
 
-Access the camera via a web browser like this. Note, the camera runs over **https** and is not accessible via http:
-
-```https://your-raspberry-pi:5220/```
-
-When first connecting you will receive a **certificate warning**. This is entirely expected and is because a self-signed certificate is being used. Just click through it by whatever means is provided in your browser. Often the button you need to click to ignore the message is tiny and obscure to avoid people not reading it. On Chrome it's under "Advanced". Once you have clicked through it once, you won't see the message again. If you are unsure what this message means, see the [self-signed certifiate section](#Self-Signed-Certificate) below for an explanation.
-
 To start the camera in the background you can do ```nohup ./camera_server.py &```
 
 The default host interface is ```0.0.0.0``` which is for access from any IPv4 network interface and should be fine for most purposes. However, if you want to start the camera on the IPv6 interface it can be achieved with this option: ```--host ::```
@@ -55,13 +49,41 @@ The default host interface is ```0.0.0.0``` which is for access from any IPv4 ne
 
 ## Usage
 
+Access the camera via a web browser like this. Note, the camera runs over **https** and is not accessible via http:
+
+```https://your-raspberry-pi:5220/```
+
+When first connecting you will receive a **certificate warning**. This is entirely expected and is because a self-signed certificate is being used. Just click through it by whatever means is provided in your browser. Often the button you need to click to ignore the message is tiny and obscure to avoid people not reading it. On Chrome it's under "Advanced". Once you have clicked through it once, you won't see the message again. If you are unsure what this message means, see the [self-signed certifiate section](#Self-Signed-Certificate) below for an explanation.
+
 On first connection, you will be asked to set the initial admin username and password for the camera:
 
 <img src="docs/set-admin-password.png" width="200px" >
 
-Then login and the camera image should be displayed.
+Then login and the security camera image should be displayed.
+
+<img width="400px" src="docs/main-window.jpg">
 
 There is a hamburger menu in the upper left corner for options.
+
+## Configuration
+
+The resolution and rotation of the camera can be modified in the options menu. In addition the timestamp size and position can be changed.
+
+<img src="docs/camera-options.png" width="400px" >
+
+A log of all user activity is recorded in the logs panel including the connecting IP and user name:
+
+<img src="docs/logs.png" width="400px" >
+
+Additional camera users can be added from the users panel. User accounts can be locked and other users can also be logged out by an admin. User accounts are automatically locked out after 10 failed password attempts.
+
+<img src="docs/additional-users.png" width="400px" >
+
+By default any IP can access the camera. However a specific set of IPs can be whitelisted using the top box on the security panel. One trailing wildcard (an asterisk character) is also permitted to wildcard a specific IP range. To enable the whitelist click the "Only below IP ranges may access camera" radio button.
+
+Additionally specific IPs or ranges can also be placed on a block list using the lower box. These IPs will be prevented from accessing the camera. Check the "Enable IP block list" checkbox to enable the list.
+
+<img src="docs/ip-ranges.png" width="400px" >
 
 ### Streaming Video
 
