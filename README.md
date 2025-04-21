@@ -1,6 +1,6 @@
 <img align="right" width="250px" src="docs/security-camera-with-raspberry.jpg">
 
-**piLittleEye** is a security camera for the Raspberry Pi using the official camera modules.<br>
+**Pi Little Eye** is a security camera for the Raspberry Pi using the official camera modules.<br>
 
 - Viewable on all devices with a browser.
 - No app required. All phones supported.
@@ -21,7 +21,7 @@ The raspberry pi must have an official camera module attached (any version). The
 To install into a Python virtual env:
 
 ```
-git clone https://github.com/InexplicableMagic/raspberry-pi-security-camera/
+git clone https://github.com/InexplicableMagic/pi-little-eye/
 cd raspberry-pi-security-camera
 
 python -m venv camera-env --system-site-packages
