@@ -43,8 +43,7 @@ class CameraHandler:
             self.available_resolutions = resolutions
             self.current_resolution = CameraHandler.__suggest_camera_resolution( resolutions, self.user_selected_res )
             self.camera_detected = True
-
-        self.recalculate_timestamp_text_position()
+            self.recalculate_timestamp_text_position()
 
     def publish_image(self):
         with self.frame_publish_lock:
@@ -219,9 +218,10 @@ class CameraHandler:
         return resolutions
         
     def append_camera_current_config(self, config):
-        config['available_camera_resolutions'] = self.get_camera_resolutions()
-        config['current_camera_resolution'] = self.get_camera_current_resolutions()
         config['is_camera_available'] = self.is_camera_detected()
+        if self.is_camera_detected():
+            config['available_camera_resolutions'] = self.get_camera_resolutions()
+            config['current_camera_resolution'] = self.get_camera_current_resolutions()
         return config
     
     # When user config options change, or the resolution changes then change the position of the timestamp text on screen    
