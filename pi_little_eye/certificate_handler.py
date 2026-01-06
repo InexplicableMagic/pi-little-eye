@@ -7,7 +7,7 @@ from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.backends import default_backend
 from cryptography import x509
 from cryptography.x509.oid import NameOID
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 class CertificateHandler:
 
@@ -91,16 +91,11 @@ class CertificateHandler:
         
         os.chmod(pem_certificate_fname, stat.S_IRUSR | stat.S_IWUSR)
             
-    def test_if_certificate_expired( pem_certificate_fname ):
-    
+    def test_if_certificate_expired(pem_certificate_fname):
         with open(pem_certificate_fname, "rb") as f:
             cert_data = f.read()
-            cert = x509.load_pem_x509_certificate(cert_data, default_backend())
+            cert = x509.load_pem_x509_certificate(cert_data)
 
-        # Check if the certificate has expired
-        now = datetime.utcnow()
-        return now > cert.not_valid_after
+        now = datetime.now(timezone.utc)
         
-        
-        
-
+        return now > cert.not_valid_after_utc
