@@ -11,6 +11,7 @@ import copy
 import os
 import gc
 import gevent
+import logging
 
 from .db_config_handler import *
 
@@ -33,7 +34,7 @@ class CameraHandler:
         self.logged_in_users = dict()
         self.update_login_lock = threading.Lock()
         # Turn off the verbose camera logging
-        Picamera2.set_logging(Picamera2.ERROR)
+        Picamera2.set_logging(logging.ERROR)
         os.environ["LIBCAMERA_LOG_LEVELS"] = "ERROR"
         #Enquire about the resolutions the attached camera can do
         self.camera_detected = False
