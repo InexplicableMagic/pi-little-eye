@@ -40,6 +40,7 @@ def suppress_bad_certificate_errors(context, type, value, tb):
     msg_lower = str(value).lower()
     if type is ssl.SSLError and (
         "sslv3 alert bad certificate" in msg_lower or
+	"ssl/tls alert bad certificate" in msg_lower or
         "alert certificate unknown" in msg_lower or
         "eof occurred in violation of protocol" in msg_lower or 
         "http request" in msg_lower

@@ -32,6 +32,8 @@ pip install -r requirements.txt
 
 The ```--system-site-packages``` option permits use of Python modules installed system-wide outside of a venv. This is particularly intended for the picamera2 module which should be installed by default in bookworm and does not seem to install particularly easily into a venv.
 
+> Pi Little Eye will run on a Raspberry Pi Zero 2W but you may wish to disable the Raspberry Pi desktop to make more memory available for the application. This can be done in raspi-config (System Options -> Boot).
+
 ## Starting the Camera
 
 To start the camera:
