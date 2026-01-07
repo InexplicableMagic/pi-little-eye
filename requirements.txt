@@ -1,7 +1,7 @@
-picamera2>=0.3.22
-RPi.GPIO>=0.7.1
-flask==3.1.0
-gevent==24.11.1
-numpy==1.24.2
-opencv-python==4.10.0.84
-bcrypt>=4.2.1
+#picamera2==0.3.33
+RPi.GPIO==0.7.1
+flask==3.1.2
+gevent==25.9.1
+numpy==2.2.6
+opencv-python==4.12.0.88
+bcrypt==5.0.0
