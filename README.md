@@ -15,9 +15,9 @@
 
 ## Installation
 
-These instructions are for Raspberry Pi OS 64-bit bookworm edition upwards. 
+These instructions were tested with Raspberry Pi OS 64-bit Trixie edition.
 
-The raspberry pi must have an official camera module attached (any version). The project does not work with USB cameras. See here for [raspberry pi camera installation instructions](https://leoncode.co.uk/articles/installing-the-raspberry-pi-camera-module/).
+The Raspberry Pi must have an official camera module attached (any version). The project does not work with USB cameras. See here for [raspberry pi camera installation instructions](https://leoncode.co.uk/articles/installing-the-raspberry-pi-camera-module/).
 
 To install Pi Little Eye into a Python virtual env:
 
@@ -30,9 +30,9 @@ source camera-env/bin/activate
 pip install -r requirements.txt
 ```
 
-The ```--system-site-packages``` option permits use of Python modules installed system-wide outside of a venv. This is particularly intended for the picamera2 module which should be installed by default in bookworm and does not seem to install particularly easily into a venv.
+The ```--system-site-packages``` option permits use of Python modules installed system-wide outside of a venv. This is particularly intended for the picamera2 module which should be installed by default in Trixie and does not seem to install particularly easily into a venv.
 
-> Pi Little Eye will run on a Raspberry Pi Zero 2W but you may wish to disable the Raspberry Pi desktop to make more memory available for the application. This can be done in raspi-config (System Options -> Boot).
+> Pi Little Eye will run on a Raspberry Pi Zero 2W but you may wish to disable the Raspberry Pi desktop to make more memory available for the application. This can be done in raspi-config (System Options -> Boot -> Console Text console).
 
 ## Starting the Camera
 
