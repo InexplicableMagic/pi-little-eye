@@ -9,19 +9,22 @@ from cryptography.hazmat.primitives import serialization, hashes
 from cryptography import x509
 from cryptography.x509.oid import NameOID, ExtendedKeyUsageOID
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 
 class CertificateHandler:
 
-    CERTIFICATES_DIR = "certificates"
+    CERTIFICATES_DIR = str( (Path(__file__).parent / "../certificates").resolve() )
 
     # Root CA — install this one on clients to trust the leaf cert
-    CA_CERTIFICATE_FNAME = "ca_cert.pem"
+    # Many operating system will recognise .crt extension as a certificate
+    # This is intended to be downloaded and installed
+    CA_CERTIFICATE_FNAME = "ca_cert.crt"
     CA_PRIVATE_KEY_FNAME = "ca_key.pem"
     CA_VALIDITY_DAYS = 3650  # 10 years
 
-    CERTIFICATE_FNAME = "certfile.pem"
-    PRIVATE_KEY_FNAME = "key.pem"
+    CERTIFICATE_FNAME = "camera_cert.pem"
+    PRIVATE_KEY_FNAME = "camera_key.pem"
     LEAF_VALIDITY_DAYS = 365
 
     # User-added SAN entries (e.g. via a CLI flag), persisted across restarts
