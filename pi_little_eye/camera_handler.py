@@ -3,7 +3,6 @@ import numpy as np
 
 from datetime import datetime, timedelta
 from picamera2 import Picamera2
-import RPi.GPIO as GPIO
 from functools import wraps
 import threading
 import time
@@ -226,42 +225,36 @@ class CameraHandler:
         return config
     
     # When user config options change, or the resolution changes then change the position of the timestamp text on screen    
-    def recalculate_timestamp_text_position( self ):
+    def recalculate_timestamp_text_position(self):
         timestamp_text = str(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        
-        with self.option_change_lock:
-            timestamp_scale_factor = CameraHandler.scale_name_to_scale_value( self.timestamp_scale_name )
-            # Base text size - set for an image resolution of 640x480
-            self.timestamp_text_scale = 0.5
-            # Scale up or down the text size based on the actual camera resolution setting with reference to the 640x480 base size
-            self.timestamp_text_scale *= (self.current_resolution[1] / 480)
-            # Further scale up or down the text size based on the user text size config setting       
-            self.timestamp_text_scale *= timestamp_scale_factor       
 
-            # Increase the thickness of the font at higher camera resolutions
+        with self.option_change_lock:
+            timestamp_scale_factor = CameraHandler.scale_name_to_scale_value(self.timestamp_scale_name)
+            self.timestamp_text_scale = 0.5
+            self.timestamp_text_scale *= (self.current_resolution[1] / 480)
+            self.timestamp_text_scale *= timestamp_scale_factor
+
             self.timestamp_thickness_inner = int((self.current_resolution[1] / 480))
             if self.timestamp_thickness_inner < 1:
                 self.timestamp_thickness_inner = 1
-            self.timestamp_thickness_outer = self.timestamp_thickness_inner*2    
-            
-            # Predict the resulting width/height of the timestamp text in pixels so we can calculate the screen position from this
-            (text_width, text_height), baseline = cv2.getTextSize(timestamp_text, cv2.FONT_HERSHEY_SIMPLEX, self.timestamp_text_scale, self.timestamp_thickness_outer)
-            
-            # Amount of padding from the edges of the image based on 640x480 resolution
-            top_padding_pixels_at_480 = 3
+            self.timestamp_thickness_outer = self.timestamp_thickness_inner * 2
+
+            (text_width, text_height), baseline = cv2.getTextSize(
+                timestamp_text, cv2.FONT_HERSHEY_SIMPLEX,
+                self.timestamp_text_scale, self.timestamp_thickness_outer
+            )
+
+            top_padding_pixels_at_480 = 1
             side_padding_pixels_at_640 = 1
-            
-            # Rescale the padding for higher resolutions
-            top_padding_resolution_scaled = int(((self.current_resolution[1] / 480)*top_padding_pixels_at_480))
-            side_padding_pixels_resolution_scaled = int(((self.current_resolution[0] / 640)*side_padding_pixels_at_640))
-            
+            top_padding_resolution_scaled = int(((self.current_resolution[1] / 480) * top_padding_pixels_at_480))
+            side_padding_pixels_resolution_scaled = int(((self.current_resolution[0] / 640) * side_padding_pixels_at_640))
+
             image_width = self.current_resolution[0]
             image_height = self.current_resolution[1]
             if self.image_rotation_degrees == 90 or self.image_rotation_degrees == 270:
                 image_width = self.current_resolution[1]
                 image_height = self.current_resolution[0]
-            
-            # Position the timestamp text based on the user config selection
+
             if self.timestamp_position == 'top-left':
                 self.timestamp_left_edge = side_padding_pixels_resolution_scaled
                 self.timestamp_bottom_edge = text_height + top_padding_resolution_scaled
@@ -272,20 +265,49 @@ class CameraHandler:
                 self.timestamp_left_edge = side_padding_pixels_resolution_scaled
                 self.timestamp_bottom_edge = image_height - top_padding_resolution_scaled - 1
             else:
-                # Bottom right
                 self.timestamp_left_edge = image_width - text_width - side_padding_pixels_resolution_scaled
-                self.timestamp_bottom_edge = image_height - top_padding_resolution_scaled - 1            
+                self.timestamp_bottom_edge = image_height - top_padding_resolution_scaled - 1
+
+            # Precompute the dilation kernel once here rather than every frame in add_timestamp()
+            outline_width = max(1, self.timestamp_thickness_outer - self.timestamp_thickness_inner)
+            self.timestamp_outline_kernel = cv2.getStructuringElement(
+                cv2.MORPH_ELLIPSE, (outline_width * 2 + 1, outline_width * 2 + 1)
+            )
+            # Small bounding-box padding for the mask ROI (covers dilation + AA overhang)
+            self.timestamp_mask_pad = outline_width * 3 + 4
 
     def add_timestamp(self, frame):
         timestamp_text = str(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        # Text drawn twice to make the font outline - so it's visible on any background colour
 
-        # Draw the text twice, once at a thicker size and once at a thinner size to get an outline effect
-        # This improves visibility of the text at all camera constrasts
-        cv2.putText(frame, timestamp_text, (self.timestamp_left_edge, self.timestamp_bottom_edge), cv2.FONT_HERSHEY_SIMPLEX, self.timestamp_text_scale, (0, 0, 0), self.timestamp_thickness_outer, cv2.LINE_AA)
-        cv2.putText(frame, timestamp_text, (self.timestamp_left_edge, self.timestamp_bottom_edge), cv2.FONT_HERSHEY_SIMPLEX, self.timestamp_text_scale, (255, 255, 255), self.timestamp_thickness_inner, cv2.LINE_AA)
+        x0, y0 = self.timestamp_left_edge, self.timestamp_bottom_edge
+        (text_w, text_h), baseline = cv2.getTextSize(
+            timestamp_text, cv2.FONT_HERSHEY_SIMPLEX, self.timestamp_text_scale, self.timestamp_thickness_outer
+        )
+        pad = self.timestamp_mask_pad
+        x_min = max(x0 - pad, 0)
+        y_min = max(y0 - text_h - pad, 0)
+        x_max = min(x0 + text_w + pad, frame.shape[1])
+        y_max = min(y0 + baseline + pad, frame.shape[0])
+
+        roi = frame[y_min:y_max, x_min:x_max]
+        local_org = (x0 - x_min, y0 - y_min)
+
+        mask = np.zeros(roi.shape[:2], dtype=np.uint8)
+        cv2.putText(mask, timestamp_text, local_org, cv2.FONT_HERSHEY_SIMPLEX,
+                    self.timestamp_text_scale, 255, self.timestamp_thickness_inner, cv2.LINE_AA)
+
+        outline_mask = cv2.dilate(mask, self.timestamp_outline_kernel)
+
+        outline_alpha = (outline_mask.astype(np.float32) / 255.0)[..., None]
+        roi[:] = (roi * (1 - outline_alpha)).astype(np.uint8)
+
+        fill_alpha = (mask.astype(np.float32) / 255.0)[..., None]
+        roi[:] = (roi * (1 - fill_alpha) + 255 * fill_alpha).astype(np.uint8)
+
+        frame[y_min:y_max, x_min:x_max] = roi
         return frame
-    
+
+
     # Returns an image with some text on it for debugging
     def create_message_image(text):
         img = np.zeros((150, 640, 3), np.uint8)
