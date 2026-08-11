@@ -14,6 +14,7 @@ import time
 import secrets
 import sys
 import threading
+import secrets
 
 class DBConfigHandler:
     
@@ -422,7 +423,7 @@ class DBConfigHandler:
         new_hash = bcrypt.hashpw(password_bytes, salt_bytes)
         new_hex_hash = binascii.hexlify(new_hash).decode('utf-8')
         
-        return new_hex_hash == hex_hash
+        return secrets.compare_digest( new_hex_hash, hex_hash )
         
     # Considerably faster than bcrypt
     # Used for user sessions
@@ -1273,7 +1274,7 @@ class DBConfigHandler:
             test_secret_sha512 = DBConfigHandler.sha512_hash( secret )
             if retrieved_secret_sha512:
                 if len( retrieved_secret_sha512 ) == 1:
-                    if retrieved_secret_sha512[0] == test_secret_sha512:
+                    if secrets.compare_digest( retrieved_secret_sha512[0], test_secret_sha512 ):
                         return True
                         
             return False
@@ -1310,7 +1311,7 @@ class DBConfigHandler:
                         
             if retrieved_token_sha512:
                 if len( retrieved_token_sha512 ) == 2:
-                    if retrieved_token_sha512[0] == test_token_sha512:
+                    if secrets.compare_digest( retrieved_token_sha512[0], test_token_sha512 ):
                         username = retrieved_token_sha512[1].lower()
                         if self.test_user_exists( username ):
                             if not self.is_account_locked( username ):

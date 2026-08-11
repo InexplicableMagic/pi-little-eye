@@ -8,6 +8,7 @@ from pi_little_eye.certificate_handler import *
 import uuid
 import argparse
 import ssl
+import secrets
 
 app = Flask(__name__)
 
@@ -273,7 +274,7 @@ def set_config():
         if post_data:
             csrf_in_post = post_data.get('csrf_token', None)
             csrf_in_cookie = request.cookies.get('csrf_token')
-            if DBConfigHandler.is_uuid_valid( csrf_in_cookie ) and DBConfigHandler.is_uuid_valid( csrf_in_post ) and csrf_in_cookie == csrf_in_post:
+            if DBConfigHandler.is_uuid_valid( csrf_in_cookie ) and DBConfigHandler.is_uuid_valid( csrf_in_post ) and secrets.compare_digest( csrf_in_cookie,  csrf_in_post ):
                 current_user_permissions = dbch.get_user_permissions( username )
                 if current_user_permissions is not None and current_user_permissions == 'admin':
                     if DBConfigHandler.validate_config_object( post_data ):
@@ -340,7 +341,7 @@ def log_management():
             if post_data:
                 csrf_in_post = post_data.get('csrf_token', None)
                 csrf_in_cookie = request.cookies.get('csrf_token')
-                if DBConfigHandler.is_uuid_valid( csrf_in_cookie ) and DBConfigHandler.is_uuid_valid( csrf_in_post ) and csrf_in_cookie == csrf_in_post:
+                if DBConfigHandler.is_uuid_valid( csrf_in_cookie ) and DBConfigHandler.is_uuid_valid( csrf_in_post ) and secrets.compare_digest( csrf_in_cookie, csrf_in_post ):
                     if 'full_clear' in post_data and post_data['full_clear']:
                         dbch.delete_old_log_lines( full_clear = True )
                         log_entry( 'info', 'logs_cleared', f"Cleared logs", username=username )
@@ -369,7 +370,7 @@ def account_management():
         if post_data:
             csrf_in_post = post_data.get('csrf_token', None)
             csrf_in_cookie = request.cookies.get('csrf_token')
-            if DBConfigHandler.is_uuid_valid( csrf_in_cookie ) and DBConfigHandler.is_uuid_valid( csrf_in_post ) and csrf_in_cookie == csrf_in_post:
+            if DBConfigHandler.is_uuid_valid( csrf_in_cookie ) and DBConfigHandler.is_uuid_valid( csrf_in_post ) and secrets.compare_digest( csrf_in_cookie, csrf_in_post ):
                 if dbch.test_user_exists( username_authenticated ): 
                     current_user_permissions = dbch.get_user_permissions( username_authenticated )
                     if current_user_permissions is not None and current_user_permissions == 'admin':
@@ -488,7 +489,7 @@ def set_pass():
             csrf_in_post = post_data.get('csrf_token', None)
             csrf_in_cookie = request.cookies.get('csrf_token')
             
-            if DBConfigHandler.is_uuid_valid( csrf_in_cookie ) and DBConfigHandler.is_uuid_valid( csrf_in_post ) and csrf_in_cookie == csrf_in_post:        
+            if DBConfigHandler.is_uuid_valid( csrf_in_cookie ) and DBConfigHandler.is_uuid_valid( csrf_in_post ) and secrets.compare_digest( csrf_in_cookie, csrf_in_post ):
                 if new_password and challenge:
                     if dbch.validate_challege( challenge ):
                         # Check if the app is waiting for the initial admin password to be set
@@ -574,7 +575,7 @@ def generate_app_key():
         challenge = post_data.get('challenge', None)
         csrf_in_post = post_data.get('csrf_token', None)
         csrf_in_cookie = request.cookies.get('csrf_token')
-        if DBConfigHandler.is_uuid_valid( csrf_in_cookie ) and DBConfigHandler.is_uuid_valid( csrf_in_post ) and csrf_in_cookie == csrf_in_post:
+        if DBConfigHandler.is_uuid_valid( csrf_in_cookie ) and DBConfigHandler.is_uuid_valid( csrf_in_post ) and secrets.compare_digest( csrf_in_cookie, csrf_in_post ):
             (authenticated, message, http_code, username_authenticated) = is_cookie_authenticated_with_challenge( challenge )
             if authenticated:
                 current_user_permissions = dbch.get_user_permissions( username_authenticated )
@@ -604,7 +605,7 @@ def delete_app_key():
     if post_data:
         csrf_in_post = post_data.get('csrf_token', None)
         csrf_in_cookie = request.cookies.get('csrf_token')
-        if DBConfigHandler.is_uuid_valid( csrf_in_cookie ) and DBConfigHandler.is_uuid_valid( csrf_in_post ) and csrf_in_cookie == csrf_in_post:
+        if DBConfigHandler.is_uuid_valid( csrf_in_cookie ) and DBConfigHandler.is_uuid_valid( csrf_in_post ) and secrets.compare_digest( csrf_in_cookie, csrf_in_post ):
             (authenticated, message, http_code, username_authenticated) = is_cookie_authenticated( )
             if authenticated:
                 current_user_permissions = dbch.get_user_permissions( username_authenticated )
