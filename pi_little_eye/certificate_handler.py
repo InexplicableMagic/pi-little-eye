@@ -26,6 +26,8 @@ class CertificateHandler:
     CERTIFICATE_FNAME = "camera_cert.pem"
     PRIVATE_KEY_FNAME = "camera_key.pem"
     LEAF_VALIDITY_DAYS = 365
+    # Renew certificate this number of days before expiry
+    LEAF_RENEWAL_BUFFER_DAYS = 2
 
     # User-added SAN entries (e.g. via a CLI flag), persisted across restarts
     # and renewals so they aren't lost when the leaf is reissued.
@@ -160,7 +162,7 @@ class CertificateHandler:
             ca_regenerated
             or not os.path.exists(cert_path)
             or not os.path.exists(key_path)
-            or CertificateHandler.test_if_certificate_expired(cert_path)
+            or CertificateHandler.test_if_certificate_expired(cert_path, buffer_days=CertificateHandler.LEAF_RENEWAL_BUFFER_DAYS)
             or not CertificateHandler.certificate_covers_names(cert_path, dns_names, ip_addresses)
         )
 
@@ -352,10 +354,10 @@ class CertificateHandler:
 
         return certificate
 
-    def test_if_certificate_expired(pem_certificate_fname):
+    def test_if_certificate_expired(pem_certificate_fname, buffer_days=0):
         cert = CertificateHandler.load_certificate(pem_certificate_fname)
         now = datetime.now(timezone.utc)
-        return now > cert.not_valid_after_utc
+        return now + timedelta(days=buffer_days) > cert.not_valid_after_utc
 
     # Returns False (forcing reissue) if the cert on disk is missing any
     # hostname/IP the Pi currently answers to — e.g. DHCP handed it a new

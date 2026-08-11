@@ -2,6 +2,7 @@
 
 from flask import Flask, Response, request, render_template, jsonify, make_response, send_from_directory, send_file, abort
 from gevent import pywsgi
+from gevent import ssl as gevent_ssl
 from pi_little_eye.db_config_handler import *
 from pi_little_eye.camera_handler import *
 from pi_little_eye.certificate_handler import *
@@ -673,7 +674,6 @@ def index():
 
 
 if __name__ == '__main__':
-
     parser = argparse.ArgumentParser(description="Raspberry Pi Security Camera")
     # Add the arguments
     parser.add_argument('--host', type=str, default='0.0.0.0', help='Host address to bind to (default: 0.0.0.0)')
@@ -683,37 +683,60 @@ if __name__ == '__main__':
     parser.add_argument('--additional-cert-name', type=str, help='Add an additional DNS name for this camera to the self-signed certificate')
     parser.add_argument('--disable-ip-lists', action='store_true', help='Disable IP white list and block list - use if you have accidentally blocked your own IP')
     parser.add_argument('--factory-reset', action='store_true', help='Reset to factory defaults - use e.g. if you have forgotten the admin password')
-
     # Parse the arguments
     args = parser.parse_args()
     check_command_line_args( args, parser )
- 
+
     dbch = DBConfigHandler("security_cam_state.sqlite", args.factory_reset)
     ch = CameraHandler( dbch )
     dbch.write_log_line( 'info', False, '','', 'software_started', 'Software started' )
-
     # Option to enable access if the user has locked themselves out due to incorrect IP whitelist settings
     if args.disable_ip_lists:
         self.write_log_line( 'warning', True, '','', 'ip_disable', 'IP whitelist/blocklist disabled via command line' )
         dbch.disable_ip_whitelist_and_blocklist()
-
     # Suppress exceptions caused by self-sign certificate usage being printed to the terminal
     original_error_handler = gevent.get_hub().handle_error
     gevent.get_hub().handle_error = suppress_bad_certificate_errors
-
     # User supplies their own certificate option
-    if args.certificate and args.key:
+    using_own_certificate = bool(args.certificate and args.key)
+    if using_own_certificate:
         # User supplied certificate and key
         keyfile = args.key
         certfile = args.certificate
     else:
-        # Generate a self-sign TLS certificate by default so the user doesn't have to supply one   
+        # Generate a self-sign TLS certificate by default so the user doesn't have to supply one
         CertificateHandler.update_tls_certificates()
+        # If the user wants to add an additional name to the certificate SAN, then add it and exit
         if args.additional_cert_name:
             CertificateHandler.add_dns_name_to_certificate(args.additional_cert_name)
+            sys.exit(0)
         keyfile = CertificateHandler.get_key_file_path()
         certfile = CertificateHandler.get_cert_file_path()
 
-    http_server = pywsgi.WSGIServer( (args.host, args.port), app, keyfile=keyfile, certfile=certfile )
-    http_server.serve_forever()
+    # Build a long-lived SSLContext so certificates can be rotated without
+    # dropping already-established connections (e.g. an in-progress video feed).
+    # IMPORTANT: this must be gevent's SSLContext (from gevent.ssl), not the
+    # standard library's ssl.SSLContext. 
+    ssl_context = gevent_ssl.SSLContext(gevent_ssl.PROTOCOL_TLS_SERVER)
+    ssl_context.load_cert_chain(certfile, keyfile)
 
+    # Do a certificate reload once a day
+    def reload_certificate_periodically():
+        while True:
+            gevent.sleep(86400)  # one a day
+            try:
+                if not using_own_certificate:
+                    # Regenerates the self-signed cert only if it's actually
+                    # close to expiry; assumed to be a no-op otherwise
+                    CertificateHandler.update_tls_certificates()
+                # Re-read from disk and apply to the *same* context object.
+                # New connections pick this up; existing ones are untouched.
+                ssl_context.load_cert_chain(certfile, keyfile)
+                dbch.write_log_line( 'info', False, '', '', 'cert_reload', 'TLS certificate reloaded' )
+            except Exception as e:
+                dbch.write_log_line( 'error', False, '', '', 'cert_reload_failed', f'TLS certificate reload failed: {e}' )
+
+    gevent.spawn(reload_certificate_periodically)
+
+    http_server = pywsgi.WSGIServer( (args.host, args.port), app, ssl_context=ssl_context )
+    http_server.serve_forever()
