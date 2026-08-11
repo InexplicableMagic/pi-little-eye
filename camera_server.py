@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from flask import Flask, Response, request, render_template, jsonify, make_response, send_from_directory, abort
+from flask import Flask, Response, request, render_template, jsonify, make_response, send_from_directory, send_file, abort
 from gevent import pywsgi
 from pi_little_eye.db_config_handler import *
 from pi_little_eye.camera_handler import *
@@ -10,6 +10,9 @@ import argparse
 import ssl
 
 app = Flask(__name__)
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CA_CERT_PATH = os.path.join(BASE_DIR, 'certificates', 'ca_cert.crt')
 
 # Return anti-caching headers to force the browser to check the live version of the REST URL
 def nocache(view):
@@ -22,12 +25,12 @@ def nocache(view):
         return response
     return no_cache
 
-# Restrict the supplied post data to 16MB which should be plenty for all the REST methods
+# Restrict the supplied post data to 4MB which should be plenty for all the REST methods
 def limit_content_length(f):
     @wraps(f)
     def wrapper_function(*args, **kwargs):
         content_length = request.headers.get('Content-Length')
-        if content_length and int(content_length) > 16*1024*1024:
+        if content_length and int(content_length) > 4*1024*1024:
             # Abort with a 413 if the content length is exceeded
             abort(413)
         return f(*args, **kwargs)
@@ -621,15 +624,36 @@ def delete_app_key():
         else:
             log_entry( 'warning', 'csrf', f"Anti cross-site script check failure on trying to delete appkey. Might be a browser cookie problem but could indicate a possible malicious link click.", alert=True )
             response = make_response( jsonify ( { 'error': True, 'message': 'CSRF parameter or cookie problem on deleting an app key. Try refreshing page.', 'err_type': 'csrf_problem' } ), 400 )               
-    
+
     return response
+
+#Allow download of a certificate authority that matches the self-signed certificate
+
+
+@app.route('/download/ca-certificate', methods=['GET'])
+def download_ca_certificate():
+    (authenticated, message, http_code, username_authenticated) = is_cookie_authenticated( )
+    if authenticated:
+        log_entry( 'info', 'cert', 'CA certificate downloaded', alert=False, username=username_authenticated )
+        if not os.path.isfile(CA_CERT_PATH):
+            abort(404, description="CA certificate not found")
+
+        return send_file(
+            CA_CERT_PATH,
+            mimetype='application/x-x509-ca-cert',
+            as_attachment=True,
+            download_name='camera_ca_cert.crt'
+        )
+    else:
+        log_entry( 'warning', 'cert', 'Unauthenticated attempt to download CA certificate', alert=True )
+        abort(401, description="Access not authorised")
 
 
 @app.route('/robots.txt')
 def static_from_root():
     log_entry( 'warning', 'robots', 'robots.txt file was requested. This may indicate a web search engine has discovered this camera.', alert=True )
     return send_from_directory(app.static_folder, request.path[1:])
-    
+
 
 @app.route('/')
 @nocache
@@ -648,7 +672,7 @@ def index():
 
 
 if __name__ == '__main__':
-        
+
     parser = argparse.ArgumentParser(description="Raspberry Pi Security Camera")
     # Add the arguments
     parser.add_argument('--host', type=str, default='0.0.0.0', help='Host address to bind to (default: 0.0.0.0)')
@@ -662,20 +686,20 @@ if __name__ == '__main__':
     # Parse the arguments
     args = parser.parse_args()
     check_command_line_args( args, parser )
-    
+ 
     dbch = DBConfigHandler("security_cam_state.sqlite", args.factory_reset)
     ch = CameraHandler( dbch )
     dbch.write_log_line( 'info', False, '','', 'software_started', 'Software started' )
-        
+
     # Option to enable access if the user has locked themselves out due to incorrect IP whitelist settings
     if args.disable_ip_lists:
         self.write_log_line( 'warning', True, '','', 'ip_disable', 'IP whitelist/blocklist disabled via command line' )
         dbch.disable_ip_whitelist_and_blocklist()
-    
+
     # Suppress exceptions caused by self-sign certificate usage being printed to the terminal
     original_error_handler = gevent.get_hub().handle_error
     gevent.get_hub().handle_error = suppress_bad_certificate_errors
-    
+
     # User supplies their own certificate option
     if args.certificate and args.key:
         # User supplied certificate and key
