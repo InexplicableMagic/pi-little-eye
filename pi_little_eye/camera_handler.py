@@ -11,6 +11,11 @@ import os
 import gc
 import gevent
 import logging
+import io
+from multiprocessing import get_context, shared_memory
+
+from PIL import Image, ImageDraw
+
 
 from .db_config_handler import *
 
@@ -44,6 +49,47 @@ class CameraHandler:
             self.current_resolution = CameraHandler.__suggest_camera_resolution( resolutions, self.user_selected_res )
             self.camera_detected = True
             self.recalculate_timestamp_text_position()
+            
+        ctx = get_context("spawn")  # explicit spawn: fresh interpreter, no inherited state
+        self.bg_shared_mem = shared_memory.SharedMemory(create=True, size=4*1024*1024)
+        self.frame_len = ctx.Value("i", 0)   # length in bytes of the current frame
+        self.frame_id = ctx.Value("i", -1)    # bumped every time a new frame is published
+        self.frame_gen_lock = ctx.Lock()
+
+        cam = ctx.Process(
+            target=CameraHandler.bg_image_producer,
+            args=(self.bg_shared_mem.name, self.frame_gen_lock, self.frame_len, self.frame_id, 640,480),
+            daemon=True,
+        )
+        cam.start()
+    
+    @staticmethod
+    def bg_image_producer(shm_name: str, lock, frame_len, frame_id, res_width,res_height):
+        shm = shared_memory.SharedMemory(name=shm_name)
+        running = True
+        fps = 30
+        fid = 0
+        try:
+            while running:
+                # Draw test image
+                img = Image.new("RGB", (res_width, res_height), (30, 30, 200))
+                draw = ImageDraw.Draw(img)
+                draw.text((10, 10), f"frame {fid}  t={time.time():.2f}", fill=(255, 255, 255))
+     
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=70)
+                data = buf.getvalue()
+                
+                with lock:
+                    shm.buf[: len(data)] = data
+                    frame_len.value = len(data)
+                    fid += 1
+                    frame_id.value = fid  # bumping this is how consumers detect "new frame"
+
+
+                time.sleep(1/fps)
+        finally:
+            shm.close()
 
     def publish_image(self):
         with self.frame_publish_lock:
@@ -353,7 +399,8 @@ class CameraHandler:
     def generate_camera_video(self, username):            
         username = username.lower()
         self.add_viewing_user( username )
-        self.start_camera()    
+        #self.start_camera()    
+        
         try:
             last_posted_frame = -1
             new_frame = False
@@ -363,21 +410,22 @@ class CameraHandler:
             
                 #Each frame has a frame number
                 #Check if there is a new frame number published since last time we checked
-                with self.frame_publish_lock:
-                    if self.last_frame is not None:
-                        if self.frame_num > 0 and last_posted_frame < self.frame_num:
-                            frame = self.last_frame
-                            last_posted_frame = self.frame_num
-                            new_frame = True
+                                
+                if self.frame_id.value > 0 and last_posted_frame < self.frame_id.value:
+                    last_posted_frame = self.frame_id.value
+                    with self.frame_gen_lock:
+                        length = self.frame_len.value
+                        frame = bytes(self.bg_shared_mem.buf[:length])
+                        new_frame = True
                 
                 if new_frame:
                     new_frame = False
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                    # Look for a new frame immediately
                     gevent.sleep(0)
                 else:
                     # Check for new frames at a slightly faster rate than the camera frame rate
-                    #time.sleep(0.01)
                     gevent.sleep(0.01)
                
             yield (b'--frame\r\n'
@@ -394,6 +442,6 @@ class CameraHandler:
                     else:
                         self.config.write_log_line( 'info', False , username, '', 'disconnect', f"Session disconnected." )
             
-            if self.get_total_num_viewing_sessions() < 1:
-                self.stop_camera()
+            #if self.get_total_num_viewing_sessions() < 1:
+            #    self.stop_camera()
             
