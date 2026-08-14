@@ -946,7 +946,7 @@ function addEventListeners() {
 	window.addEventListener('pageshow', function(event) {
     if (document.visibilityState === 'visible') {
             const div = document.getElementById('main-window');
-            if (div.style.display !== 'none'){
+            if (window.getComputedStyle(div) !== 'none'){
                 restartVideoFeed()
             }
       }
@@ -974,51 +974,45 @@ function addEventListeners() {
      });
 }
 
-function restartVideoFeed() {                
-        // Create an img element
-                
-        // Append the img element to the video container
-        const videoContainer = document.getElementById('video-container')
+function restartVideoFeed() {        
+    // 1. Guard clause: If the video feed is already present and active, stop here!
+    if (document.getElementById('video-feed')) {
+        return;
+    }
         
-        // Remove the existing video element if it exists
+    const videoContainer = document.getElementById('video-container');
+    
+    // Clear container and create new image element
+    videoContainer.innerHTML = '';
+    
+    const img = document.createElement('img');
+    img.src = videoURL + '?nocache=' + new Date().getTime();
+    img.id = "video-feed";
+    
+    // If the video image cannot be displayed, print an error
+    img.onerror = function() {
+        console.log("Cannot start video");
+        
         const vfIMGElement = document.getElementById('video-feed');
-        if(vfIMGElement){
+        if (vfIMGElement) {
             vfIMGElement.onerror = null;
-            vfIMGElement.src="";
+            vfIMGElement.src = "";
             vfIMGElement.remove();
         }
         
-        const img = document.createElement('img');
-        // Even though anti-caching headers are set, it still caches sometimes
-        // This tries to force no caching by changing the URL
-        videoContainer.innerHTML=''
-        img.src = videoURL+'?nocache=' + new Date().getTime();
-        img.id = "video-feed"
+        videoContainer.innerHTML = '';
         
-        //If the video image cannot be displayed, then print an error instead
-        img.onerror = function() {
-            console.log("Cannot start video")
-            
-            const vfIMGElement = document.getElementById('video-feed');
-            if(vfIMGElement){
-                vfIMGElement.onerror = null;
-                vfIMGElement.src="";
-                vfIMGElement.remove();
-            }
-            
-            const videoContainer = document.getElementById('video-container')
-            videoContainer.innerHTML=''
-            
-            var errorSpan = document.createElement('span');
-            errorSpan.textContent = "Error: Unable to contact camera. Check network and refresh."
-            errorSpan.setAttribute('id', 'video-error-span');
-            errorSpan.style.color = 'white';
-            videoContainer.appendChild( errorSpan )
-        }
-        
-        videoContainer.appendChild(img);
-        
+        var errorSpan = document.createElement('span');
+        errorSpan.textContent = "Error: Unable to contact camera. Check network and refresh.";
+        errorSpan.setAttribute('id', 'video-error-span');
+        errorSpan.style.color = 'white';
+        videoContainer.appendChild(errorSpan);
+    };
+    
+    videoContainer.appendChild(img);
 }
+
+
 
 function saveIPChangesConfig(){
     const allowedIPTextArea = document.getElementById('allowed-ip-list')

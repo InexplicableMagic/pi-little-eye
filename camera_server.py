@@ -160,7 +160,8 @@ def video_mjpeg():
 
                 # If authentication was successful, return the video feed
                 log_entry( 'info', 'video_viewed', f"Camera viewed", username=username )
-                return Response(ch.generate_camera_video(username), mimetype='multipart/x-mixed-replace; boundary=frame')
+                #return Response(ch.generate_camera_video(username), mimetype='multipart/x-mixed-replace; boundary=frame')
+                return Response(ch.generate_camera_video(username), content_type='multipart/x-mixed-replace; boundary=frame', direct_passthrough=True)
             except RuntimeError as e:
                 return Response(CameraHandler.create_message_image("Camera Failure (see logs)"),mimetype='image/png')
             except Exception as e:
@@ -738,5 +739,6 @@ if __name__ == '__main__':
 
     gevent.spawn(reload_certificate_periodically)
 
+    pywsgi.WSGIServer.handler_class.protocol = "HTTP/1.0"
     http_server = pywsgi.WSGIServer( (args.host, args.port), app, ssl_context=ssl_context )
     http_server.serve_forever()

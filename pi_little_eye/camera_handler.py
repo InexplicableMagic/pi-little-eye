@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 
+from gevent import GreenletExit
 from datetime import datetime, timedelta
 from picamera2 import Picamera2
 from functools import wraps
@@ -49,7 +50,7 @@ class CameraHandler:
             self.current_resolution = CameraHandler.__suggest_camera_resolution( resolutions, self.user_selected_res )
             self.camera_detected = True
             self.recalculate_timestamp_text_position()
-            
+                       
         ctx = get_context("spawn")  # explicit spawn: fresh interpreter, no inherited state
         self.bg_shared_mem = shared_memory.SharedMemory(create=True, size=4*1024*1024)
         self.frame_len = ctx.Value("i", 0)   # length in bytes of the current frame
@@ -58,37 +59,59 @@ class CameraHandler:
 
         cam = ctx.Process(
             target=CameraHandler.bg_image_producer,
-            args=(self.bg_shared_mem.name, self.frame_gen_lock, self.frame_len, self.frame_id, 640,480),
+            args=(self.bg_shared_mem.name, self.frame_gen_lock, self.frame_len, self.frame_id, self.current_resolution, self.selected_camera_number ),
             daemon=True,
         )
         cam.start()
-    
+
+   
     @staticmethod
-    def bg_image_producer(shm_name: str, lock, frame_len, frame_id, res_width,res_height):
+    def bg_image_producer(shm_name: str, lock, frame_len, frame_id, init_resolution, init_camera_num):
         shm = shared_memory.SharedMemory(name=shm_name)
         running = True
         fps = 30
         fid = 0
+        
+        picam2 = Picamera2(init_camera_num)
+        
+        # 1. YUV420 uses 62.5% LESS memory than XRGB8888.
+        # Essential for 512MB RAM on Pi Zero 2W to prevent SD card swap thrashing.
+        config = picam2.create_preview_configuration(
+            main={"format": 'YUV420', "size": init_resolution},
+            controls={"FrameDurationLimits": (int(1000000 / fps), int(1000000 / fps))}
+        )
+        picam2.configure(config)
+        picam2.start()
+        
         try:
             while running:
-                # Draw test image
-                img = Image.new("RGB", (res_width, res_height), (30, 30, 200))
-                draw = ImageDraw.Draw(img)
-                draw.text((10, 10), f"frame {fid}  t={time.time():.2f}", fill=(255, 255, 255))
-     
-                buf = io.BytesIO()
-                img.save(buf, format="JPEG", quality=70)
-                data = buf.getvalue()
+                start_time = time.time()
                 
-                with lock:
-                    shm.buf[: len(data)] = data
-                    frame_len.value = len(data)
-                    fid += 1
-                    frame_id.value = fid  # bumping this is how consumers detect "new frame"
-
-
-                time.sleep(1/fps)
+                # 2. Picamera2 native C++ JPEG encoder (NEON SIMD accelerated).
+                # Encodes directly into memory without OpenCV or NumPy overhead.
+                buf = io.BytesIO()
+                picam2.capture_file(buf, format='jpeg')
+                frame_bytes = buf.getvalue()
+                frame_size = len(frame_bytes)
+                
+                # 3. Write JPEG bytes to shared memory
+                if 0 < frame_size <= len(shm.buf):
+                    with lock:
+                        shm.buf[:frame_size] = frame_bytes
+                        frame_len.value = frame_size
+                        fid += 1
+                        frame_id.value = fid
+                
+                # Rate limiting
+                elapsed = time.time() - start_time
+                remaining_delay = (1.0 / fps) - elapsed
+                if remaining_delay > 0:
+                    time.sleep(remaining_delay)
+                else:
+                    time.sleep(0.001)
+                    
         finally:
+            picam2.stop()
             shm.close()
 
     def publish_image(self):
@@ -396,52 +419,87 @@ class CameraHandler:
         with self.update_login_lock:
             return sum(self.logged_in_users.values())
     
+    """
+        Tear and stream stop problem:
+        
+        OK, the issue was that you're exceeding the pi wi-fi bandwidth.
+        Pi Zero 2W max theoretical network capacity = 72.2Mbps.
+        Practically it is 40% of this.
+        Peak throughput 2.75 = 4.4Mbytes/s
+        When you open two video streams at max resolution, this is exceededing the network bandwidth massively.
+        
+        There was a bug in the JavaScript where you opened two streams simultaneously by mistake for each UI.
+        This caused the bandwidth to be exceeded and then it cancelled the stream.
+        
+        The bug is now fixed and you only open one stream at once.
+        However if you have two sessions running then you exceed the bandwidth again
+        So need to dial back the frame rate as more streams are opened.
+        
+        You need to get maximum capacity of pi network on different models of pi and dial down the image size so it fits the model
+        Pi 4 and 5 have much better bandwdith than the zero.
+        Reduce the compression.
+        Divide down the network capacity by the number of users.
+        
+    """
+    
     def generate_camera_video(self, username):            
         username = username.lower()
-        self.add_viewing_user( username )
-        #self.start_camera()    
-        
+        self.add_viewing_user(username)
+
         try:
             last_posted_frame = -1
-            new_frame = False
             
-            #If the user has not been logged out
-            while self.is_user_viewing( username ):
-            
-                #Each frame has a frame number
-                #Check if there is a new frame number published since last time we checked
-                                
-                if self.frame_id.value > 0 and last_posted_frame < self.frame_id.value:
-                    last_posted_frame = self.frame_id.value
-                    with self.frame_gen_lock:
-                        length = self.frame_len.value
-                        frame = bytes(self.bg_shared_mem.buf[:length])
-                        new_frame = True
+            while self.is_user_viewing(username):
+                new_frame = False
                 
-                if new_frame:
-                    new_frame = False
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-                    # Look for a new frame immediately
-                    gevent.sleep(0)
-                else:
-                    # Check for new frames at a slightly faster rate than the camera frame rate
-                    gevent.sleep(0.01)
-               
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/png\r\n\r\n' + CameraHandler.create_message_image("Logged out") + b'\r\n')
-           
+                # 1. Check if a new frame ID exists
+                if self.frame_id.value > 0 and last_posted_frame < self.frame_id.value:
+                    
+                    # 2. Try to acquire lock BEFORE touching last_posted_frame
+                    if self.frame_gen_lock.acquire(block=False):
+                        try:
+                            length = self.frame_len.value
+                            raw_bytes = self.bg_shared_mem.buf[:length]
+                            
+                            # 3. VERIFY JPEG INTEGRITY (Must start with 0xFFD8 and end with 0xFFD9)
+                            if length > 4 and raw_bytes[:2] == b'\xff\xd8' and raw_bytes[-2:] == b'\xff\xd9':
+                                frame = bytes(raw_bytes)
+                                last_posted_frame = self.frame_id.value  # Only update on valid read
+                                new_frame = True
+                                print(len(frame))
+                                print( length )
+                            else:
+                                print(f"[WARN] Incomplete/torn JPEG in shared memory (len: {length}). Skipping.")
+                        finally:
+                            self.frame_gen_lock.release()
 
+                if new_frame:
+
+                    payload = (
+                        b"--frame\r\n"
+                        b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
+                    )
+                    yield payload
+                    gevent.sleep(0.03)  # Sleep ONCE per full frame
+                    
+
+                    
+                else:
+                    gevent.sleep(0.01)
+                   
+            #yield (b'--frame\r\n'
+            #       b'Content-Type: image/png\r\n\r\n' + CameraHandler.create_message_image("Logged out") + b'\r\n')
+        except (GeneratorExit, GreenletExit):
+            print("EXIT")
+            return
         finally:
             with self.update_login_lock:
                 if username in self.logged_in_users:
-                    self.logged_in_users[username]-=1
+                    self.logged_in_users[username] -= 1
                     if self.logged_in_users[username] < 1:
                         del self.logged_in_users[username]
-                        self.config.write_log_line( 'info', False , username, '', 'disconnect', f"Stopped viewing camera." )
+                        self.config.write_log_line('info', False, username, '', 'disconnect', "Stopped viewing camera.")
                     else:
-                        self.config.write_log_line( 'info', False , username, '', 'disconnect', f"Session disconnected." )
-            
-            #if self.get_total_num_viewing_sessions() < 1:
-            #    self.stop_camera()
-            
+                        self.config.write_log_line('info', False, username, '', 'disconnect', "Session disconnected.")
+    
+ 
