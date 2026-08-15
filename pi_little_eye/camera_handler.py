@@ -57,7 +57,7 @@ class CameraHandler:
 
         self.camera_control_pipe, child_cam_control_pipe = Pipe()
         
-        camera_initial_params = self.generate_camera_parameter_message()
+        camera_initial_params = self.generate_camera_parameter_message(camera_restart=True)
         cam = ctx.Process(
             target=CameraHandler.bg_image_producer,
             args=(self.bg_shared_mem.name, self.frame_gen_lock, self.frame_len, self.frame_id, child_cam_control_pipe, camera_initial_params ),
@@ -65,7 +65,7 @@ class CameraHandler:
         )
         cam.start()
         
-    def generate_camera_parameter_message( self ):
+    def generate_camera_parameter_message( self, camera_restart=False ):
         cam_param_block = {
             'resolution': self.current_resolution,
             'selected_camera_number': self.selected_camera_number,
@@ -73,7 +73,8 @@ class CameraHandler:
             'timestamp_scale_name': self.timestamp_scale_name,
             'display_timestamp': self.display_timestamp,
             'rotation': self.image_rotation_degrees,
-            'jpeg_quality': 90
+            'jpeg_quality': 90,
+            'camera_restart': camera_restart
         }
         
         return cam_param_block
@@ -87,10 +88,7 @@ class CameraHandler:
         parameter_change = True
         rotate_fn = None
         picam2 = None
-        
-        # Reuse buffer to minimize allocations on Pi Zero 2W's 512MB RAM
-        capture_buf = io.BytesIO()
-        
+               
         try:
             while running:
                 start_time = time.time()
@@ -103,19 +101,22 @@ class CameraHandler:
                         parameter_change = True
                     
                 if parameter_change:
-                    if picam2 is not None:
-                        picam2.stop()
-                        picam2.close()
+
                 
                     # Assumed parameters are validated by this point
-                    picam2 = Picamera2(params['selected_camera_number'])
                     
-                    config = picam2.create_preview_configuration(
-                        main={"format": 'YUV420', "size": params['resolution']},
-                        controls={"FrameDurationLimits": (int(1000000 / fps), int(1000000 / fps))}
-                    )
-                    picam2.configure(config)
-                    picam2.start()
+                    if params['camera_restart'] == True or picam2 is None:
+                        if picam2 is not None:
+                            picam2.stop()
+                            picam2.close()
+                        picam2 = Picamera2(params['selected_camera_number'])
+                        
+                        config = picam2.create_preview_configuration(
+                            main={"format": 'YUV420', "size": params['resolution']},
+                            controls={"FrameDurationLimits": (int(1000000 / fps), int(1000000 / fps))}
+                        )
+                        picam2.configure(config)
+                        picam2.start()
                     
                     # Pre-compute rotation function for loop efficiency (NEON-accelerated via NumPy)
                     if params['rotation'] == 90:
@@ -132,7 +133,13 @@ class CameraHandler:
                     parameter_change = False
 
                 yuv_frame = picam2.capture_array()
+                # Convert full buffer (with padding) to BGR
                 frame = cv2.cvtColor(yuv_frame, cv2.COLOR_YUV420p2BGR)
+
+                # Crop the final BGR image to configured resolution
+                config_height = params['resolution'][1]
+                config_width = params['resolution'][0]
+                frame = frame[:config_height, :config_width]
 
                 if rotate_fn is not None:
                     frame = rotate_fn(frame)
@@ -263,8 +270,8 @@ class CameraHandler:
                 self.config.write_log_line( 'info', False , '', '', 'camera_stopped', f"Camera switched off." )
                 
 
-    def post_camera_options_change( self ):
-        msg = self.generate_camera_parameter_message()
+    def post_camera_options_change( self, camera_restart=False ):
+        msg = self.generate_camera_parameter_message(camera_restart)
         self.camera_control_pipe.send( msg )
 
     # Change the camera resolution - can be set whilst the camera is running
@@ -283,6 +290,8 @@ class CameraHandler:
                                 self.current_resolution = new_resolution
                                 self.config.insert_or_update_parameter( 'cam_res_width', 'int', new_resolution[0] )
                                 self.config.insert_or_update_parameter( 'cam_res_height', 'int', new_resolution[1] )
+                            return True
+        return False
                             
 
     def is_camera_detected(self):
@@ -306,10 +315,11 @@ class CameraHandler:
         return resolutions[0]
         
     def set_config( self, post_data ):
+        camera_restart = False
         if post_data is not None and isinstance( post_data, dict):
             if 'selected_resolution' in post_data:
                 if isinstance( post_data[ 'selected_resolution' ], (list,tuple) ):
-                    self.change_resolution( post_data[ 'selected_resolution' ] )
+                    camera_restart = self.change_resolution( post_data[ 'selected_resolution' ] )
             if 'image_rotation' in post_data:
                 self.set_new_rotation( post_data[ 'image_rotation' ] )
             if 'timestamp_scale' in post_data:
@@ -319,7 +329,7 @@ class CameraHandler:
             if 'display_timestamp' in post_data:
                 self.set_display_timestamp(  post_data[ 'display_timestamp' ] )
             
-            self.post_camera_options_change()
+            self.post_camera_options_change(camera_restart=camera_restart)
             
     
     # Get the resolutions the camera can do  
