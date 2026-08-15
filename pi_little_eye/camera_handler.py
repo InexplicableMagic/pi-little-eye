@@ -217,7 +217,7 @@ class CameraHandler:
                 picam2.close()            
             shm.close()
         
-    def set_new_rotation( self, rotation ):
+    def __set_new_rotation( self, rotation ):
         if rotation != None and isinstance(rotation, int) and rotation != self.image_rotation_degrees:
             if (rotation <= 270) and ((rotation % 90) == 0):
                 with self.option_change_lock:
@@ -236,15 +236,15 @@ class CameraHandler:
         
         return new_scaling
                     
-    def set_new_timestamp_scale( self, scale_name ):
+    def __set_new_timestamp_scale( self, scale_name ):
         with self.option_change_lock:
             self.timestamp_scale_name = scale_name
         
-    def set_new_timestamp_position( self, position ):
+    def __set_new_timestamp_position( self, position ):
         with self.option_change_lock:
             self.timestamp_position = position
             
-    def set_display_timestamp( self, do_display ):
+    def __set_display_timestamp( self, do_display ):
         with self.option_change_lock:
             self.display_timestamp = do_display
 
@@ -253,7 +253,7 @@ class CameraHandler:
         self.camera_control_pipe.send( msg )
 
     # Change the camera resolution - can be set whilst the camera is running
-    def change_resolution(self, new_resolution):
+    def __change_resolution(self, new_resolution):
         #Validate the user input
         if new_resolution is not None and isinstance(new_resolution, (list, tuple)):
             if len( new_resolution ) == 2 and isinstance( new_resolution[0], int) and isinstance( new_resolution[1], int):
@@ -298,15 +298,15 @@ class CameraHandler:
         if post_data is not None and isinstance( post_data, dict):
             if 'selected_resolution' in post_data:
                 if isinstance( post_data[ 'selected_resolution' ], (list,tuple) ):
-                    camera_restart_required = self.change_resolution( post_data[ 'selected_resolution' ] )
+                    camera_restart_required = self.__change_resolution( post_data[ 'selected_resolution' ] )
             if 'image_rotation' in post_data:
-                self.set_new_rotation( post_data[ 'image_rotation' ] )
+                self.__set_new_rotation( post_data[ 'image_rotation' ] )
             if 'timestamp_scale' in post_data:
-                self.set_new_timestamp_scale( post_data[ 'timestamp_scale' ] )
+                self.__set_new_timestamp_scale( post_data[ 'timestamp_scale' ] )
             if 'timestamp_position' in post_data:
-                self.set_new_timestamp_position( post_data[ 'timestamp_position' ] )
+                self.__set_new_timestamp_position( post_data[ 'timestamp_position' ] )
             if 'display_timestamp' in post_data:
-                self.set_display_timestamp(  post_data[ 'display_timestamp' ] )
+                self.__set_display_timestamp(  post_data[ 'display_timestamp' ] )
             
             self.post_camera_options_change(camera_restart=camera_restart_required)
             
@@ -432,7 +432,7 @@ class CameraHandler:
         return frame
 
 
-    # Returns an image with some text on it for debugging
+    # Returns a PNG image with some text on it for debugging
     def create_message_image(text):
         img = np.zeros((150, 640, 3), np.uint8)
         font = cv2.FONT_HERSHEY_SIMPLEX
@@ -516,6 +516,10 @@ class CameraHandler:
     
     def generate_camera_video(self, username):            
         username = username.lower()
+        
+        yield (b'--frame\r\n'
+                   b'Content-Type: image/png\r\n\r\n' + CameraHandler.create_message_image("Camera starting...") + b'\r\n')
+                   
         self.add_viewing_start_camera(username)
 
         try:
