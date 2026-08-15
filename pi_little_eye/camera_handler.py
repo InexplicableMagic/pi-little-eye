@@ -23,7 +23,7 @@ class CameraHandler:
 
     def __init__(self, config ):
         self.config = config
-        self.camera_running = False
+        self.camera_paused = True
         #Currently supports the first found camera
         self.selected_camera_number = config.get_parameter_value( 'cam_number' )
         self.user_selected_res = ( config.get_parameter_value( 'cam_res_width' ), config.get_parameter_value( 'cam_res_height' ) )
@@ -49,21 +49,21 @@ class CameraHandler:
             self.current_resolution = CameraHandler.__suggest_camera_resolution( resolutions, self.user_selected_res )
             self.camera_detected = True
                        
-        ctx = get_context("spawn")  # explicit spawn: fresh interpreter, no inherited state
-        self.bg_shared_mem = shared_memory.SharedMemory(create=True, size=4*1024*1024)
-        self.frame_len = ctx.Value("i", 0)   # length in bytes of the current frame
-        self.frame_id = ctx.Value("i", -1)    # bumped every time a new frame is published
-        self.frame_gen_lock = ctx.Lock()
+            ctx = get_context("spawn")  # explicit spawn: fresh interpreter, no inherited state
+            self.bg_shared_mem = shared_memory.SharedMemory(create=True, size=4*1024*1024)
+            self.frame_len = ctx.Value("i", 0)   # length in bytes of the current frame
+            self.frame_id = ctx.Value("i", -1)    # bumped every time a new frame is published
+            self.frame_gen_lock = ctx.Lock()
 
-        self.camera_control_pipe, child_cam_control_pipe = Pipe()
-        
-        camera_initial_params = self.generate_camera_parameter_message(camera_restart=True)
-        cam = ctx.Process(
-            target=CameraHandler.bg_image_producer,
-            args=(self.bg_shared_mem.name, self.frame_gen_lock, self.frame_len, self.frame_id, child_cam_control_pipe, camera_initial_params ),
-            daemon=True,
-        )
-        cam.start()
+            self.camera_control_pipe, child_cam_control_pipe = Pipe()
+            
+            camera_initial_params = self.generate_camera_parameter_message(camera_restart=True)
+            cam = ctx.Process(
+                target=CameraHandler.bg_image_producer,
+                args=(self.bg_shared_mem.name, self.frame_gen_lock, self.frame_len, self.frame_id, child_cam_control_pipe, camera_initial_params ),
+                daemon=True,
+            )
+            cam.start()  
         
     def generate_camera_parameter_message( self, camera_restart=False ):
         cam_param_block = {
@@ -73,12 +73,23 @@ class CameraHandler:
             'timestamp_scale_name': self.timestamp_scale_name,
             'display_timestamp': self.display_timestamp,
             'rotation': self.image_rotation_degrees,
-            'jpeg_quality': 90,
+            'jpeg_quality': 70,
             'camera_restart': camera_restart
         }
         
         return cam_param_block
+        
+    def pause_camera( self, new_state ):
+        with self.camera_state_change_lock:
+            if new_state != self.camera_paused:
+                self.camera_paused = new_state
+                msg = {
+                    'paused': new_state
+                }
+                self.camera_control_pipe.send( msg )
+        
     
+    # Starts in the paused state and then needs waking up to generate images
     @staticmethod
     def bg_image_producer(shm_name: str, lock, frame_len, frame_id, control_pipe, params):
         running = True
@@ -88,6 +99,7 @@ class CameraHandler:
         parameter_change = True
         rotate_fn = None
         picam2 = None
+        paused = True
                
         try:
             while running:
@@ -96,19 +108,24 @@ class CameraHandler:
                 if control_pipe.poll(0):
                     msg = control_pipe.recv()
                     if msg is not None:
-                        params = msg
-                        
-                        parameter_change = True
+                        if 'paused' in msg:
+                            paused = msg['paused']
+                        else:
+                            params = msg
+                            parameter_change = True
                     
-                if parameter_change:
-
-                
+                if parameter_change or picam2 is None:
                     # Assumed parameters are validated by this point
                     
+                    #Changing resolution requires a camera restart
                     if params['camera_restart'] == True or picam2 is None:
+                        #Stop and restart camera with new parameters
                         if picam2 is not None:
-                            picam2.stop()
-                            picam2.close()
+                            try:
+                                picam2.stop()
+                                picam2.close()
+                            except Exception:
+                                pass
                         picam2 = Picamera2(params['selected_camera_number'])
                         
                         config = picam2.create_preview_configuration(
@@ -116,8 +133,8 @@ class CameraHandler:
                             controls={"FrameDurationLimits": (int(1000000 / fps), int(1000000 / fps))}
                         )
                         picam2.configure(config)
-                        picam2.start()
                     
+                    # Changing other options does not require a restart
                     # Pre-compute rotation function for loop efficiency (NEON-accelerated via NumPy)
                     if params['rotation'] == 90:
                         rotate_fn = lambda f: np.rot90(f, k=3)  # 3x 90° CCW = 1x 90° CW
@@ -128,87 +145,77 @@ class CameraHandler:
                     else:
                         rotate_fn = None
                     
-                    print(params)
                     timestamp_params = CameraHandler.recalculate_timestamp_text_position( params['timestamp_scale_name'], params['resolution'][0] ,params['resolution'][1] , params['rotation'], params['timestamp_position'] )
                     parameter_change = False
+                
+                if not paused:
+                    # Start camera if previously stopped
+                    try:
+                        if picam2 is not None:
+                            if not picam2.started:
+                                picam2.start()
+                    except Exception:
+                        pass
 
-                yuv_frame = picam2.capture_array()
-                # Convert full buffer (with padding) to BGR
-                frame = cv2.cvtColor(yuv_frame, cv2.COLOR_YUV420p2BGR)
+                    yuv_frame = picam2.capture_array()
+                    # Convert full buffer (with padding) to BGR
+                    frame = cv2.cvtColor(yuv_frame, cv2.COLOR_YUV420p2BGR)
 
-                # Crop the final BGR image to configured resolution
-                config_height = params['resolution'][1]
-                config_width = params['resolution'][0]
-                frame = frame[:config_height, :config_width]
+                    # Crop the final BGR image to configured resolution
+                    config_height = params['resolution'][1]
+                    config_width = params['resolution'][0]
+                    frame = frame[:config_height, :config_width]
 
-                if rotate_fn is not None:
-                    frame = rotate_fn(frame)
-                    # Ensure contiguous memory for downstream operations
-                    frame = np.ascontiguousarray(frame)
-                
-                # Apply timestamp overlay
-                if params['display_timestamp']:
-                    frame = CameraHandler.add_timestamp(frame, timestamp_params)
-                
-                success, encoded = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, params['jpeg_quality']])
-                
-                if not success:
-                    # Skip frame if encoding fails
-                    time.sleep(0.001)
-                    continue
-                
-                frame_bytes = encoded.tobytes()
-                
-                frame_size = len(frame_bytes)
-                
-                # Write JPEG bytes to shared memory
-                if 0 < frame_size <= len(shm.buf):
-                    with lock:
-                        shm.buf[:frame_size] = frame_bytes
-                        frame_len.value = frame_size
-                        fid += 1
-                        frame_id.value = fid
-                
-                # Rate limiting
-                elapsed = time.time() - start_time
-                remaining_delay = (1.0 / fps) - elapsed
-                if remaining_delay > 0:
-                    time.sleep(remaining_delay)
+                    if rotate_fn is not None:
+                        frame = rotate_fn(frame)
+                        # Ensure contiguous memory for downstream operations
+                        frame = np.ascontiguousarray(frame)
+                    
+                    # Apply timestamp overlay
+                    if params['display_timestamp']:
+                        frame = CameraHandler.add_timestamp(frame, timestamp_params)
+                    
+                    success, encoded = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, params['jpeg_quality']])
+                    
+                    if not success:
+                        # Skip frame if encoding fails
+                        time.sleep(0.001)
+                        continue
+                    
+                    frame_bytes = encoded.tobytes()
+                    
+                    frame_size = len(frame_bytes)
+                    
+                    # Write JPEG bytes to shared memory
+                    if 0 < frame_size <= len(shm.buf):
+                        with lock:
+                            shm.buf[:frame_size] = frame_bytes
+                            frame_len.value = frame_size
+                            fid += 1
+                            frame_id.value = fid
+                    
+                    # Rate limiting
+                    elapsed = time.time() - start_time
+                    remaining_delay = (1.0 / fps) - elapsed
+                    if remaining_delay > 0:
+                        time.sleep(remaining_delay)
+                    else:
+                        time.sleep(0.001)
                 else:
-                    time.sleep(0.001)
+                    # Stop camera if previously started
+                    try:
+                        if picam2 is not None:
+                            if picam2.started:
+                                picam2.stop()
+                    except Exception:
+                        pass
+                    time.sleep(0.1)
                     
         finally:
-            picam2.stop()
-            picam2.close()
+            if picam2 is not None:
+                picam2.stop()
+                picam2.close()            
             shm.close()
-
-    def publish_image(self):
-        with self.frame_publish_lock:
-            self.frame_num = -1
-        while self.camera_running:
-            frame = self.picam2.capture_array()
-            frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2RGB)  # Convert XRGB to RGB
-            with self.option_change_lock:
-               frame = CameraHandler.rotate_image( frame, self.image_rotation_degrees )
-               if self.display_timestamp:
-                   frame = self.add_timestamp(frame)
-            ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 50] )
-            frame = buffer.tobytes()
-            with self.frame_publish_lock:
-                self.last_frame = frame
-                self.frame_num +=1
-            # Up to about 30FPS
-            time.sleep(0.03)
-
-    def rotate_image( frame, rotation ):
-        if rotation == 90:
-            return cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
-        elif rotation == 180:
-            return cv2.rotate(frame, cv2.ROTATE_180)
-        elif rotation == 270:
-            return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
-             
-        return frame
         
     def set_new_rotation( self, rotation ):
         if rotation != None and isinstance(rotation, int) and rotation != self.image_rotation_degrees:
@@ -240,35 +247,6 @@ class CameraHandler:
     def set_display_timestamp( self, do_display ):
         with self.option_change_lock:
             self.display_timestamp = do_display
-        
-    def start_camera(self):
-        if self.camera_detected:
-            with self.camera_state_change_lock:
-                if not self.camera_running:
-                    self.picam2 = Picamera2(self.selected_camera_number)
-                    self.picam2.configure(self.picam2.create_preview_configuration(main={"format": 'XRGB8888', "size": self.current_resolution}))
-                    self.picam2.start()
-                    self.camera_running = True
-                    time.sleep(0.1)
-                    self.capture_thread = threading.Thread(target=self.publish_image)
-                    self.capture_thread.start()
-                    self.config.write_log_line( 'info', False , '', '', 'camera_started', f"Camera switched on." )
-                
-            
-    def stop_camera(self):
-        with self.camera_state_change_lock:
-            if self.camera_running and self.picam2 is not None:
-                self.camera_running = False
-                self.capture_thread.join()
-                with self.frame_publish_lock:
-                     self.last_frame = None
-                     self.frame_num = -1
-
-                self.picam2.stop()
-                self.picam2.close()
-                
-                self.config.write_log_line( 'info', False , '', '', 'camera_stopped', f"Camera switched off." )
-                
 
     def post_camera_options_change( self, camera_restart=False ):
         msg = self.generate_camera_parameter_message(camera_restart)
@@ -313,13 +291,14 @@ class CameraHandler:
         
         # If we can't find anything suitable, return the first resolution on the list
         return resolutions[0]
-        
+    
+    # Takes a posted config change from the UI and converts it into settings changes
     def set_config( self, post_data ):
-        camera_restart = False
+        camera_restart_required = False
         if post_data is not None and isinstance( post_data, dict):
             if 'selected_resolution' in post_data:
                 if isinstance( post_data[ 'selected_resolution' ], (list,tuple) ):
-                    camera_restart = self.change_resolution( post_data[ 'selected_resolution' ] )
+                    camera_restart_required = self.change_resolution( post_data[ 'selected_resolution' ] )
             if 'image_rotation' in post_data:
                 self.set_new_rotation( post_data[ 'image_rotation' ] )
             if 'timestamp_scale' in post_data:
@@ -329,27 +308,21 @@ class CameraHandler:
             if 'display_timestamp' in post_data:
                 self.set_display_timestamp(  post_data[ 'display_timestamp' ] )
             
-            self.post_camera_options_change(camera_restart=camera_restart)
+            self.post_camera_options_change(camera_restart=camera_restart_required)
             
     
     # Get the resolutions the camera can do  
-    # Should be called once on boot           
+    # Called once on boot and must be called before background thread starts
     def __enumerate_resolutions( self, camera_number ):
         resolutions = []
         
         try:
-            with self.camera_state_change_lock:
-                if self.camera_running:
-                    pc2 = self.picam2
-                else:
-                    pc2 = Picamera2(camera_number)
-                sensor_modes = pc2.sensor_modes
-                for camfmt in sensor_modes:
-                    if 'size' in camfmt:
-                        resolutions.append( camfmt['size'] )
-            
-                if not self.camera_running:
-                    pc2.close()
+            pc2 = Picamera2(camera_number)
+            sensor_modes = pc2.sensor_modes
+            for camfmt in sensor_modes:
+                if 'size' in camfmt:
+                    resolutions.append( camfmt['size'] )
+            pc2.close()
         except:
             return None
         
@@ -470,7 +443,7 @@ class CameraHandler:
         ret, buffer = cv2.imencode('.png', img)
         return buffer.tobytes()
     
-    def add_viewing_user( self, username ):
+    def add_viewing_start_camera( self, username ):
         username = username.lower()
         with self.update_login_lock:
             if username in self.logged_in_users:
@@ -479,6 +452,23 @@ class CameraHandler:
             else:
                 self.logged_in_users[username] = 1
                 #print( "viewing:"+str(self.logged_in_users[username]) )
+            print("Started")
+            self.pause_camera( False )
+           
+    def remove_viewing_user_stop_camera( self, username ):
+        username = username.lower()
+        with self.update_login_lock:
+            if username in self.logged_in_users:
+                self.logged_in_users[username] -= 1
+                if self.logged_in_users[username] < 1:
+                    del self.logged_in_users[username]
+                    self.config.write_log_line('info', False, username, '', 'disconnect', "Stopped viewing camera.")
+                else:
+                    self.config.write_log_line('info', False, username, '', 'disconnect', "Session disconnected.")
+            # If there are no other users connected - pause the camera
+            if sum(self.logged_in_users.values()) < 1:
+                print("Stopped")
+                self.pause_camera( True )
 
     def is_user_viewing( self, username ):
         with self.update_login_lock:
@@ -526,7 +516,7 @@ class CameraHandler:
     
     def generate_camera_video(self, username):            
         username = username.lower()
-        self.add_viewing_user(username)
+        self.add_viewing_start_camera(username)
 
         try:
             last_posted_frame = -1
@@ -570,16 +560,8 @@ class CameraHandler:
             yield (b'--frame\r\n'
                    b'Content-Type: image/png\r\n\r\n' + CameraHandler.create_message_image("Logged out") + b'\r\n')
         except (GeneratorExit, GreenletExit):
-            print("EXIT")
             return
         finally:
-            with self.update_login_lock:
-                if username in self.logged_in_users:
-                    self.logged_in_users[username] -= 1
-                    if self.logged_in_users[username] < 1:
-                        del self.logged_in_users[username]
-                        self.config.write_log_line('info', False, username, '', 'disconnect', "Stopped viewing camera.")
-                    else:
-                        self.config.write_log_line('info', False, username, '', 'disconnect', "Session disconnected.")
+            self.remove_viewing_user_stop_camera( username )
     
  
