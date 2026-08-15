@@ -1,6 +1,5 @@
 import cv2
 import numpy as np
-
 from gevent import GreenletExit
 from datetime import datetime, timedelta
 from picamera2 import Picamera2
@@ -49,7 +48,6 @@ class CameraHandler:
             self.available_resolutions = resolutions
             self.current_resolution = CameraHandler.__suggest_camera_resolution( resolutions, self.user_selected_res )
             self.camera_detected = True
-            self.recalculate_timestamp_text_position()
                        
         ctx = get_context("spawn")  # explicit spawn: fresh interpreter, no inherited state
         self.bg_shared_mem = shared_memory.SharedMemory(create=True, size=4*1024*1024)
@@ -64,7 +62,7 @@ class CameraHandler:
         )
         cam.start()
 
-   
+    """
     @staticmethod
     def bg_image_producer(shm_name: str, lock, frame_len, frame_id, init_resolution, init_camera_num):
         shm = shared_memory.SharedMemory(name=shm_name)
@@ -113,7 +111,113 @@ class CameraHandler:
         finally:
             picam2.stop()
             shm.close()
-
+    """
+    
+    
+    @staticmethod
+    def bg_image_producer(shm_name: str, lock, frame_len, frame_id, init_resolution, init_camera_num,
+                         jpeg_quality: int = 95, rotation: int = 0, apply_timestamp: bool = False ):
+        
+        apply_timestamp = True
+        
+        timestamp_params = CameraHandler.recalculate_timestamp_text_position( "medium", init_resolution[0] , init_resolution[1], rotation, 'bottom-right' )
+               
+        shm = shared_memory.SharedMemory(name=shm_name)
+        running = True
+        fps = 30
+        fid = 0
+        
+        picam2 = Picamera2(init_camera_num)
+        
+        config = picam2.create_preview_configuration(
+            main={"format": 'YUV420', "size": init_resolution},
+            controls={"FrameDurationLimits": (int(1000000 / fps), int(1000000 / fps))}
+        )
+        picam2.configure(config)
+        picam2.start()
+        
+        # Pre-compute rotation function for loop efficiency (NEON-accelerated via NumPy)
+        if rotation == 90:
+            rotate_fn = lambda f: np.rot90(f, k=3)  # 3x 90° CCW = 1x 90° CW
+        elif rotation == 180:
+            rotate_fn = lambda f: np.rot90(f, k=2)
+        elif rotation == 270:
+            rotate_fn = lambda f: np.rot90(f, k=1)
+        else:
+            rotate_fn = None
+        
+        # Reuse buffer to minimize allocations on Pi Zero 2W's 512MB RAM
+        capture_buf = io.BytesIO()
+        
+        try:
+            while running:
+                start_time = time.time()
+                
+                # Always capture raw JPEG (no quality control available in capture_file)
+                capture_buf.seek(0)
+                capture_buf.truncate(0)
+                picam2.capture_file(capture_buf, format='jpeg')
+                
+                # Decode JPEG to BGR image for quality/transform control
+                # Use getvalue() to avoid buffer export conflicts with np.frombuffer()
+                jpeg_bytes = capture_buf.getvalue()
+                nparr = np.frombuffer(jpeg_bytes, np.uint8)
+                frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                
+                if frame is None:
+                    # Skip frame if decode fails
+                    time.sleep(0.001)
+                    continue
+                
+                # Apply rotation using NEON-accelerated NumPy operations
+                # np.rot90 is more memory-efficient than cv2.rotate on ARM
+                if rotate_fn is not None:
+                    frame = rotate_fn(frame)
+                    # Ensure contiguous memory for downstream operations
+                    frame = np.ascontiguousarray(frame)
+                
+                # Apply timestamp overlay
+                if apply_timestamp:
+                    frame = CameraHandler.add_timestamp(frame, timestamp_params)
+                
+                # Re-encode to JPEG with specified quality
+                # OpenCV's JPEG encoder uses NEON SIMD on ARM platforms
+                success, encoded = cv2.imencode(
+                    '.jpg', frame, 
+                    [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality]
+                )
+                
+                if not success:
+                    # Skip frame if encoding fails
+                    time.sleep(0.001)
+                    continue
+                
+                frame_bytes = encoded.tobytes()
+                
+                frame_size = len(frame_bytes)
+                
+                # Write JPEG bytes to shared memory
+                if 0 < frame_size <= len(shm.buf):
+                    with lock:
+                        shm.buf[:frame_size] = frame_bytes
+                        frame_len.value = frame_size
+                        fid += 1
+                        frame_id.value = fid
+                
+                # Rate limiting
+                elapsed = time.time() - start_time
+                remaining_delay = (1.0 / fps) - elapsed
+                if remaining_delay > 0:
+                    time.sleep(remaining_delay)
+                else:
+                    time.sleep(0.001)
+                    
+        finally:
+            picam2.stop()
+            shm.close()
+       
+    
+    
     def publish_image(self):
         with self.frame_publish_lock:
             self.frame_num = -1
@@ -148,6 +252,7 @@ class CameraHandler:
                 with self.option_change_lock:
                     self.image_rotation_degrees = rotation
 
+    @staticmethod
     def scale_name_to_scale_value( scale_name ):
         new_scaling = float( 1.0 )
         if scale_name == 'small':
@@ -216,8 +321,10 @@ class CameraHandler:
                             with self.camera_state_change_lock:
                                 with self.frame_publish_lock:
                                     if self.camera_running:
-                                        new_config = self.picam2.create_still_configuration(main={"format": 'XRGB8888', "size": new_resolution})
-                                        self.picam2.switch_mode(new_config)
+                                        pass
+                                        #new_config = self.picam2.create_still_configuration(main={"format": 'XRGB8888', "size": new_resolution})
+                                        #self.picam2.switch_mode(new_config)
+                                        # TODO Post message INSTEAD
                             
                             # Update the config with the selected resolution
                             with self.option_change_lock:
@@ -225,7 +332,6 @@ class CameraHandler:
                                 self.config.insert_or_update_parameter( 'cam_res_width', 'int', new_resolution[0] )
                                 self.config.insert_or_update_parameter( 'cam_res_height', 'int', new_resolution[1] )
                             
-                            self.recalculate_timestamp_text_position()
 
     def is_camera_detected(self):
         return self.camera_detected
@@ -293,66 +399,79 @@ class CameraHandler:
             config['current_camera_resolution'] = self.get_camera_current_resolutions()
         return config
     
-    # When user config options change, or the resolution changes then change the position of the timestamp text on screen    
-    def recalculate_timestamp_text_position(self):
+    # When user config options change, or the resolution changes then change the position of the timestamp text on screen
+    @staticmethod
+    def recalculate_timestamp_text_position( timestamp_scale_name, cam_width, cam_height, image_rotation_degrees, timestamp_position ):
         timestamp_text = str(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
-        with self.option_change_lock:
-            timestamp_scale_factor = CameraHandler.scale_name_to_scale_value(self.timestamp_scale_name)
-            self.timestamp_text_scale = 0.5
-            self.timestamp_text_scale *= (self.current_resolution[1] / 480)
-            self.timestamp_text_scale *= timestamp_scale_factor
 
-            self.timestamp_thickness_inner = int((self.current_resolution[1] / 480))
-            if self.timestamp_thickness_inner < 1:
-                self.timestamp_thickness_inner = 1
-            self.timestamp_thickness_outer = self.timestamp_thickness_inner * 2
+        timestamp_scale_factor = CameraHandler.scale_name_to_scale_value(timestamp_scale_name)
+        timestamp_text_scale = 0.5
+        timestamp_text_scale *= (cam_height/ 480)
+        timestamp_text_scale *= timestamp_scale_factor
 
-            (text_width, text_height), baseline = cv2.getTextSize(
-                timestamp_text, cv2.FONT_HERSHEY_SIMPLEX,
-                self.timestamp_text_scale, self.timestamp_thickness_outer
-            )
+        timestamp_thickness_inner = int((cam_height/ 480))
+        if timestamp_thickness_inner < 1:
+            timestamp_thickness_inner = 1
+        timestamp_thickness_outer = timestamp_thickness_inner * 2
 
-            top_padding_pixels_at_480 = 1
-            side_padding_pixels_at_640 = 1
-            top_padding_resolution_scaled = int(((self.current_resolution[1] / 480) * top_padding_pixels_at_480))
-            side_padding_pixels_resolution_scaled = int(((self.current_resolution[0] / 640) * side_padding_pixels_at_640))
-
-            image_width = self.current_resolution[0]
-            image_height = self.current_resolution[1]
-            if self.image_rotation_degrees == 90 or self.image_rotation_degrees == 270:
-                image_width = self.current_resolution[1]
-                image_height = self.current_resolution[0]
-
-            if self.timestamp_position == 'top-left':
-                self.timestamp_left_edge = side_padding_pixels_resolution_scaled
-                self.timestamp_bottom_edge = text_height + top_padding_resolution_scaled
-            elif self.timestamp_position == 'top-right':
-                self.timestamp_left_edge = image_width - text_width - side_padding_pixels_resolution_scaled
-                self.timestamp_bottom_edge = text_height + top_padding_resolution_scaled
-            elif self.timestamp_position == 'bottom-left':
-                self.timestamp_left_edge = side_padding_pixels_resolution_scaled
-                self.timestamp_bottom_edge = image_height - top_padding_resolution_scaled - 1
-            else:
-                self.timestamp_left_edge = image_width - text_width - side_padding_pixels_resolution_scaled
-                self.timestamp_bottom_edge = image_height - top_padding_resolution_scaled - 1
-
-            # Precompute the dilation kernel once here rather than every frame in add_timestamp()
-            outline_width = max(1, self.timestamp_thickness_outer - self.timestamp_thickness_inner)
-            self.timestamp_outline_kernel = cv2.getStructuringElement(
-                cv2.MORPH_ELLIPSE, (outline_width * 2 + 1, outline_width * 2 + 1)
-            )
-            # Small bounding-box padding for the mask ROI (covers dilation + AA overhang)
-            self.timestamp_mask_pad = outline_width * 3 + 4
-
-    def add_timestamp(self, frame):
-        timestamp_text = str(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-
-        x0, y0 = self.timestamp_left_edge, self.timestamp_bottom_edge
-        (text_w, text_h), baseline = cv2.getTextSize(
-            timestamp_text, cv2.FONT_HERSHEY_SIMPLEX, self.timestamp_text_scale, self.timestamp_thickness_outer
+        (text_width, text_height), baseline = cv2.getTextSize(
+            timestamp_text, cv2.FONT_HERSHEY_SIMPLEX,
+            timestamp_text_scale, timestamp_thickness_outer
         )
-        pad = self.timestamp_mask_pad
+
+        top_padding_pixels_at_480 = 1
+        side_padding_pixels_at_640 = 1
+        top_padding_resolution_scaled = int(((cam_height/ 480) * top_padding_pixels_at_480))
+        side_padding_pixels_resolution_scaled = int(((cam_width/ 640) * side_padding_pixels_at_640))
+
+        image_width = cam_width
+        image_height = cam_height
+        if image_rotation_degrees == 90 or image_rotation_degrees == 270:
+            image_width = self.current_resolution[1]
+            image_height = self.current_resolution[0]
+
+        if timestamp_position == 'top-left':
+            timestamp_left_edge = side_padding_pixels_resolution_scaled
+            timestamp_bottom_edge = text_height + top_padding_resolution_scaled
+        elif timestamp_position == 'top-right':
+            timestamp_left_edge = image_width - text_width - side_padding_pixels_resolution_scaled
+            timestamp_bottom_edge = text_height + top_padding_resolution_scaled
+        elif timestamp_position == 'bottom-left':
+            timestamp_left_edge = side_padding_pixels_resolution_scaled
+            timestamp_bottom_edge = image_height - top_padding_resolution_scaled - 1
+        else:
+            timestamp_left_edge = image_width - text_width - side_padding_pixels_resolution_scaled
+            timestamp_bottom_edge = image_height - top_padding_resolution_scaled - 1
+
+        # Precompute the dilation kernel once here rather than every frame in add_timestamp()
+        outline_width = max(1, timestamp_thickness_outer - timestamp_thickness_inner)
+        timestamp_outline_kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE, (outline_width * 2 + 1, outline_width * 2 + 1)
+        )
+        # Small bounding-box padding for the mask ROI (covers dilation + AA overhang)
+        timestamp_mask_pad = outline_width * 3 + 4
+        
+        return {
+            "timestamp_text_scale": timestamp_text_scale,
+            "timestamp_left_edge": timestamp_left_edge,
+            "timestamp_bottom_edge": timestamp_bottom_edge,
+            "timestamp_thickness_inner": timestamp_thickness_inner,
+            "timestamp_thickness_outer": timestamp_thickness_outer,
+            "timestamp_outline_kernel": timestamp_outline_kernel,
+            "timestamp_mask_pad": timestamp_mask_pad
+            
+        }
+
+    @staticmethod
+    def add_timestamp( frame, params ):
+        timestamp_text = str(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+        x0, y0 = params['timestamp_left_edge'], params['timestamp_bottom_edge']
+        (text_w, text_h), baseline = cv2.getTextSize(
+            timestamp_text, cv2.FONT_HERSHEY_SIMPLEX, params['timestamp_text_scale'], params['timestamp_thickness_outer']
+        )
+        pad = params['timestamp_mask_pad']
         x_min = max(x0 - pad, 0)
         y_min = max(y0 - text_h - pad, 0)
         x_max = min(x0 + text_w + pad, frame.shape[1])
@@ -363,9 +482,9 @@ class CameraHandler:
 
         mask = np.zeros(roi.shape[:2], dtype=np.uint8)
         cv2.putText(mask, timestamp_text, local_org, cv2.FONT_HERSHEY_SIMPLEX,
-                    self.timestamp_text_scale, 255, self.timestamp_thickness_inner, cv2.LINE_AA)
+                    params['timestamp_text_scale'], 255, params['timestamp_thickness_inner'], cv2.LINE_AA)
 
-        outline_mask = cv2.dilate(mask, self.timestamp_outline_kernel)
+        outline_mask = cv2.dilate(mask, params['timestamp_outline_kernel'])
 
         outline_alpha = (outline_mask.astype(np.float32) / 255.0)[..., None]
         roi[:] = (roi * (1 - outline_alpha)).astype(np.uint8)
@@ -452,16 +571,15 @@ class CameraHandler:
             while self.is_user_viewing(username):
                 new_frame = False
                 
-                # 1. Check if a new frame ID exists
+                # Check if a new frame ID exists
                 if self.frame_id.value > 0 and last_posted_frame < self.frame_id.value:
-                    
-                    # 2. Try to acquire lock BEFORE touching last_posted_frame
                     if self.frame_gen_lock.acquire(block=False):
                         try:
                             length = self.frame_len.value
                             raw_bytes = self.bg_shared_mem.buf[:length]
                             
-                            # 3. VERIFY JPEG INTEGRITY (Must start with 0xFFD8 and end with 0xFFD9)
+                            # Acquire the image
+                            # Verify is a valid JPEG (Must start with 0xFFD8 and end with 0xFFD9)
                             if length > 4 and raw_bytes[:2] == b'\xff\xd8' and raw_bytes[-2:] == b'\xff\xd9':
                                 frame = bytes(raw_bytes)
                                 last_posted_frame = self.frame_id.value  # Only update on valid read
@@ -473,6 +591,7 @@ class CameraHandler:
                         finally:
                             self.frame_gen_lock.release()
 
+                # New frame available to post to client
                 if new_frame:
 
                     payload = (
@@ -480,15 +599,13 @@ class CameraHandler:
                         b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
                     )
                     yield payload
-                    gevent.sleep(0.03)  # Sleep ONCE per full frame
-                    
-
+                    gevent.sleep(0.01)
                     
                 else:
                     gevent.sleep(0.01)
                    
-            #yield (b'--frame\r\n'
-            #       b'Content-Type: image/png\r\n\r\n' + CameraHandler.create_message_image("Logged out") + b'\r\n')
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/png\r\n\r\n' + CameraHandler.create_message_image("Logged out") + b'\r\n')
         except (GeneratorExit, GreenletExit):
             print("EXIT")
             return
