@@ -32,11 +32,10 @@ class CameraHandler:
         self.timestamp_position = config.get_parameter_value( 'timestamp_position' )
         self.display_timestamp = config.get_parameter_value( 'display_timestamp' )
         self.camera_state_change_lock = threading.Lock()
-        self.frame_publish_lock = threading.Lock()
         self.option_change_lock = threading.Lock()
+        self.update_login_lock = threading.Lock()
         self.last_frame = None
         self.logged_in_users = dict()
-        self.update_login_lock = threading.Lock()
         # Turn off the verbose camera logging
         Picamera2.set_logging(logging.ERROR)
         os.environ["LIBCAMERA_LOG_LEVELS"] = "ERROR"
@@ -443,16 +442,14 @@ class CameraHandler:
         ret, buffer = cv2.imencode('.png', img)
         return buffer.tobytes()
     
+    
     def add_viewing_start_camera( self, username ):
         username = username.lower()
         with self.update_login_lock:
             if username in self.logged_in_users:
                 self.logged_in_users[username]+=1
-                #print( "viewing:"+str(self.logged_in_users[username]) )
             else:
                 self.logged_in_users[username] = 1
-                #print( "viewing:"+str(self.logged_in_users[username]) )
-            print("Started")
             self.pause_camera( False )
            
     def remove_viewing_user_stop_camera( self, username ):
@@ -467,7 +464,6 @@ class CameraHandler:
                     self.config.write_log_line('info', False, username, '', 'disconnect', "Session disconnected.")
             # If there are no other users connected - pause the camera
             if sum(self.logged_in_users.values()) < 1:
-                print("Stopped")
                 self.pause_camera( True )
 
     def is_user_viewing( self, username ):
@@ -490,6 +486,11 @@ class CameraHandler:
     def get_total_num_viewing_sessions( self ):
         with self.update_login_lock:
             return sum(self.logged_in_users.values())
+    
+    
+    # Get a realistic number for the maximum transfer rate on the pi wifi in MBytes/s
+    def get_pi_max_wifi_rate( self ):
+        return 3.5
     
     """
         Tear and stream stop problem:
@@ -517,16 +518,25 @@ class CameraHandler:
     def generate_camera_video(self, username):            
         username = username.lower()
         
+        
+        
         yield (b'--frame\r\n'
                    b'Content-Type: image/png\r\n\r\n' + CameraHandler.create_message_image("Camera starting...") + b'\r\n')
                    
         self.add_viewing_start_camera(username)
+        # Estimate a realistic number for the maximum wi-fi transfer capability of the pi
+        # in bytes/s. We will try and avoid exceeding this
+        max_rate_bytes_s = self.get_pi_max_wifi_rate()*1024*1024  
+        # The minimum time between frames to avoid swamping the wifi
+        min_interframe_delay = 1/30 
 
         try:
             last_posted_frame = -1
+            last_frame_post_time = 0
             
             while self.is_user_viewing(username):
                 new_frame = False
+                
                 
                 # Check if a new frame ID exists
                 if self.frame_id.value > 0 and last_posted_frame < self.frame_id.value:
@@ -537,14 +547,16 @@ class CameraHandler:
                             
                             # Acquire the image
                             # Verify is a valid JPEG (Must start with 0xFFD8 and end with 0xFFD9)
-                            if length > 4 and raw_bytes[:2] == b'\xff\xd8' and raw_bytes[-2:] == b'\xff\xd9':
+                            if length > 100 and raw_bytes[:2] == b'\xff\xd8' and raw_bytes[-2:] == b'\xff\xd9':
                                 frame = bytes(raw_bytes)
                                 last_posted_frame = self.frame_id.value  # Only update on valid read
                                 new_frame = True
-                                print(len(frame))
+                                total_sessions_open = self.get_total_num_viewing_sessions()
+                                if total_sessions_open > 0:
+                                    max_fps = (max_rate_bytes_s / total_sessions_open ) / length
+                                    min_interframe_delay = 1/max_fps
+                                print( max_fps )
                                 print( length )
-                            else:
-                                print(f"[WARN] Incomplete/torn JPEG in shared memory (len: {length}). Skipping.")
                         finally:
                             self.frame_gen_lock.release()
 
@@ -556,8 +568,14 @@ class CameraHandler:
                         b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
                     )
                     yield payload
-                    gevent.sleep(0.01)
+                    now = time.time()
+                    # Limit the frame rate to avoid swamping the wi-fi
+                    remaining_frame_delay = 0.01
+                    if (now - last_frame_post_time) < min_interframe_delay:
+                        remaining_frame_delay = min_interframe_delay - (now - last_frame_post_time)
+                    gevent.sleep(remaining_frame_delay)
                     
+                    last_frame_post_time = time.time()
                 else:
                     gevent.sleep(0.01)
                    
