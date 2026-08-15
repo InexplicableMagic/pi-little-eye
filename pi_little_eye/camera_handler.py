@@ -12,7 +12,7 @@ import gc
 import gevent
 import logging
 import io
-from multiprocessing import get_context, shared_memory
+from multiprocessing import get_context, shared_memory, Pipe
 
 from PIL import Image, ImageDraw
 
@@ -55,96 +55,38 @@ class CameraHandler:
         self.frame_id = ctx.Value("i", -1)    # bumped every time a new frame is published
         self.frame_gen_lock = ctx.Lock()
 
+        self.camera_control_pipe, child_cam_control_pipe = Pipe()
+        
+        camera_initial_params = self.generate_camera_parameter_message()
         cam = ctx.Process(
             target=CameraHandler.bg_image_producer,
-            args=(self.bg_shared_mem.name, self.frame_gen_lock, self.frame_len, self.frame_id, self.current_resolution, self.selected_camera_number ),
+            args=(self.bg_shared_mem.name, self.frame_gen_lock, self.frame_len, self.frame_id, child_cam_control_pipe, camera_initial_params ),
             daemon=True,
         )
         cam.start()
-
-    """
-    @staticmethod
-    def bg_image_producer(shm_name: str, lock, frame_len, frame_id, init_resolution, init_camera_num):
-        shm = shared_memory.SharedMemory(name=shm_name)
-        running = True
-        fps = 30
-        fid = 0
         
-        picam2 = Picamera2(init_camera_num)
+    def generate_camera_parameter_message( self ):
+        cam_param_block = {
+            'resolution': self.current_resolution,
+            'selected_camera_number': self.selected_camera_number,
+            'timestamp_position': self.timestamp_position,
+            'timestamp_scale_name': self.timestamp_scale_name,
+            'display_timestamp': self.display_timestamp,
+            'rotation': self.image_rotation_degrees,
+            'jpeg_quality': 90
+        }
         
-        # 1. YUV420 uses 62.5% LESS memory than XRGB8888.
-        # Essential for 512MB RAM on Pi Zero 2W to prevent SD card swap thrashing.
-        config = picam2.create_preview_configuration(
-            main={"format": 'YUV420', "size": init_resolution},
-            controls={"FrameDurationLimits": (int(1000000 / fps), int(1000000 / fps))}
-        )
-        picam2.configure(config)
-        picam2.start()
-        
-        try:
-            while running:
-                start_time = time.time()
-                
-                # 2. Picamera2 native C++ JPEG encoder (NEON SIMD accelerated).
-                # Encodes directly into memory without OpenCV or NumPy overhead.
-                buf = io.BytesIO()
-                picam2.capture_file(buf, format='jpeg')
-                frame_bytes = buf.getvalue()
-                frame_size = len(frame_bytes)
-                
-                # 3. Write JPEG bytes to shared memory
-                if 0 < frame_size <= len(shm.buf):
-                    with lock:
-                        shm.buf[:frame_size] = frame_bytes
-                        frame_len.value = frame_size
-                        fid += 1
-                        frame_id.value = fid
-                
-                # Rate limiting
-                elapsed = time.time() - start_time
-                remaining_delay = (1.0 / fps) - elapsed
-                if remaining_delay > 0:
-                    time.sleep(remaining_delay)
-                else:
-                    time.sleep(0.001)
-                    
-        finally:
-            picam2.stop()
-            shm.close()
-    """
-    
+        return cam_param_block
     
     @staticmethod
-    def bg_image_producer(shm_name: str, lock, frame_len, frame_id, init_resolution, init_camera_num,
-                         jpeg_quality: int = 95, rotation: int = 0, apply_timestamp: bool = False ):
-        
-        apply_timestamp = True
-        
-        timestamp_params = CameraHandler.recalculate_timestamp_text_position( "medium", init_resolution[0] , init_resolution[1], rotation, 'bottom-right' )
-               
-        shm = shared_memory.SharedMemory(name=shm_name)
+    def bg_image_producer(shm_name: str, lock, frame_len, frame_id, control_pipe, params):
         running = True
+        shm = shared_memory.SharedMemory(name=shm_name)
         fps = 30
         fid = 0
-        
-        picam2 = Picamera2(init_camera_num)
-        
-        config = picam2.create_preview_configuration(
-            main={"format": 'YUV420', "size": init_resolution},
-            controls={"FrameDurationLimits": (int(1000000 / fps), int(1000000 / fps))}
-        )
-        picam2.configure(config)
-        picam2.start()
-        
-        # Pre-compute rotation function for loop efficiency (NEON-accelerated via NumPy)
-        if rotation == 90:
-            rotate_fn = lambda f: np.rot90(f, k=3)  # 3x 90° CCW = 1x 90° CW
-        elif rotation == 180:
-            rotate_fn = lambda f: np.rot90(f, k=2)
-        elif rotation == 270:
-            rotate_fn = lambda f: np.rot90(f, k=1)
-        else:
-            rotate_fn = None
+        parameter_change = True
+        rotate_fn = None
+        picam2 = None
         
         # Reuse buffer to minimize allocations on Pi Zero 2W's 512MB RAM
         capture_buf = io.BytesIO()
@@ -153,39 +95,55 @@ class CameraHandler:
             while running:
                 start_time = time.time()
                 
-                # Always capture raw JPEG (no quality control available in capture_file)
-                capture_buf.seek(0)
-                capture_buf.truncate(0)
-                picam2.capture_file(capture_buf, format='jpeg')
+                if control_pipe.poll(0):
+                    msg = control_pipe.recv()
+                    if msg is not None:
+                        params = msg
+                        
+                        parameter_change = True
+                    
+                if parameter_change:
+                    if picam2 is not None:
+                        picam2.stop()
+                        picam2.close()
                 
-                # Decode JPEG to BGR image for quality/transform control
-                # Use getvalue() to avoid buffer export conflicts with np.frombuffer()
-                jpeg_bytes = capture_buf.getvalue()
-                nparr = np.frombuffer(jpeg_bytes, np.uint8)
-                frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                
-                if frame is None:
-                    # Skip frame if decode fails
-                    time.sleep(0.001)
-                    continue
-                
-                # Apply rotation using NEON-accelerated NumPy operations
-                # np.rot90 is more memory-efficient than cv2.rotate on ARM
+                    # Assumed parameters are validated by this point
+                    picam2 = Picamera2(params['selected_camera_number'])
+                    
+                    config = picam2.create_preview_configuration(
+                        main={"format": 'YUV420', "size": params['resolution']},
+                        controls={"FrameDurationLimits": (int(1000000 / fps), int(1000000 / fps))}
+                    )
+                    picam2.configure(config)
+                    picam2.start()
+                    
+                    # Pre-compute rotation function for loop efficiency (NEON-accelerated via NumPy)
+                    if params['rotation'] == 90:
+                        rotate_fn = lambda f: np.rot90(f, k=3)  # 3x 90° CCW = 1x 90° CW
+                    elif params['rotation'] == 180:
+                        rotate_fn = lambda f: np.rot90(f, k=2)
+                    elif params['rotation'] == 270:
+                        rotate_fn = lambda f: np.rot90(f, k=1)
+                    else:
+                        rotate_fn = None
+                    
+                    print(params)
+                    timestamp_params = CameraHandler.recalculate_timestamp_text_position( params['timestamp_scale_name'], params['resolution'][0] ,params['resolution'][1] , params['rotation'], params['timestamp_position'] )
+                    parameter_change = False
+
+                yuv_frame = picam2.capture_array()
+                frame = cv2.cvtColor(yuv_frame, cv2.COLOR_YUV420p2BGR)
+
                 if rotate_fn is not None:
                     frame = rotate_fn(frame)
                     # Ensure contiguous memory for downstream operations
                     frame = np.ascontiguousarray(frame)
                 
                 # Apply timestamp overlay
-                if apply_timestamp:
+                if params['display_timestamp']:
                     frame = CameraHandler.add_timestamp(frame, timestamp_params)
                 
-                # Re-encode to JPEG with specified quality
-                # OpenCV's JPEG encoder uses NEON SIMD on ARM platforms
-                success, encoded = cv2.imencode(
-                    '.jpg', frame, 
-                    [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality]
-                )
+                success, encoded = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, params['jpeg_quality']])
                 
                 if not success:
                     # Skip frame if encoding fails
@@ -214,10 +172,9 @@ class CameraHandler:
                     
         finally:
             picam2.stop()
+            picam2.close()
             shm.close()
-       
-    
-    
+
     def publish_image(self):
         with self.frame_publish_lock:
             self.frame_num = -1
@@ -306,6 +263,10 @@ class CameraHandler:
                 self.config.write_log_line( 'info', False , '', '', 'camera_stopped', f"Camera switched off." )
                 
 
+    def post_camera_options_change( self ):
+        msg = self.generate_camera_parameter_message()
+        self.camera_control_pipe.send( msg )
+
     # Change the camera resolution - can be set whilst the camera is running
     def change_resolution(self, new_resolution):
         #Validate the user input
@@ -316,16 +277,7 @@ class CameraHandler:
                     #Validates the resolution passed in is a mode available on this camera
                     if self.camera_detected:
                         new_resolution = CameraHandler.__suggest_camera_resolution( self.available_resolutions, new_resolution )
-                        if new_resolution[0] != self.current_resolution[0] or new_resolution[1] != self.current_resolution[1]:
-                            # Set the camera resolution
-                            with self.camera_state_change_lock:
-                                with self.frame_publish_lock:
-                                    if self.camera_running:
-                                        pass
-                                        #new_config = self.picam2.create_still_configuration(main={"format": 'XRGB8888', "size": new_resolution})
-                                        #self.picam2.switch_mode(new_config)
-                                        # TODO Post message INSTEAD
-                            
+                        if new_resolution[0] != self.current_resolution[0] or new_resolution[1] != self.current_resolution[1]:                            
                             # Update the config with the selected resolution
                             with self.option_change_lock:
                                 self.current_resolution = new_resolution
@@ -367,7 +319,8 @@ class CameraHandler:
             if 'display_timestamp' in post_data:
                 self.set_display_timestamp(  post_data[ 'display_timestamp' ] )
             
-            self.recalculate_timestamp_text_position()
+            self.post_camera_options_change()
+            
     
     # Get the resolutions the camera can do  
     # Should be called once on boot           
@@ -428,8 +381,8 @@ class CameraHandler:
         image_width = cam_width
         image_height = cam_height
         if image_rotation_degrees == 90 or image_rotation_degrees == 270:
-            image_width = self.current_resolution[1]
-            image_height = self.current_resolution[0]
+            image_width = cam_height
+            image_height = cam_width
 
         if timestamp_position == 'top-left':
             timestamp_left_edge = side_padding_pixels_resolution_scaled
