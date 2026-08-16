@@ -940,18 +940,7 @@ function addEventListeners() {
         setupTextAreaValidation('blocked-ip-list');
     });
 
-    //Attempt to start the video feed if the video DIV is visible
-    //Restart the video on change in session history e.g. user clicks the back button
-    //after being on another page
-	window.addEventListener('pageshow', function(event) {
-    if (document.visibilityState === 'visible') {
-            const div = document.getElementById('main-window');
-            if (window.getComputedStyle(div) !== 'none'){
-                restartVideoFeed()
-            }
-      }
-    });
-    
+   
     // Restart the video if the page becomes visible after previously being hidden
     document.addEventListener('visibilitychange', function() {
             if (document.visibilityState === 'visible') {
@@ -974,12 +963,7 @@ function addEventListeners() {
      });
 }
 
-function restartVideoFeed() {        
-    // 1. Guard clause: If the video feed is already present and active, stop here!
-    if (document.getElementById('video-feed')) {
-        return;
-    }
-        
+function restartVideoFeed() {       
     const videoContainer = document.getElementById('video-container');
     
     // Clear container and create new image element

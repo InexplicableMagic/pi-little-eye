@@ -1,3 +1,6 @@
+from gevent import monkey
+monkey.patch_all()
+
 import cv2
 import numpy as np
 from gevent import GreenletExit
@@ -490,7 +493,7 @@ class CameraHandler:
     
     # Get a realistic number for the maximum transfer rate on the pi wifi in MBytes/s
     def get_pi_max_wifi_rate( self ):
-        return 3.5
+        return 3
     
     """
         Tear and stream stop problem:
@@ -565,23 +568,31 @@ class CameraHandler:
 
                     payload = (
                         b"--frame\r\n"
-                        b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
+                        b"Content-Type: image/jpeg\r\n"
+                        b"Content-Length: " + str(len(frame)).encode() + b"\r\n"
+                        b"\r\n" + frame + b"\r\n"
                     )
-                    yield payload
+
+                    yield payload                   
+                    
                     now = time.time()
                     # Limit the frame rate to avoid swamping the wi-fi
                     remaining_frame_delay = 0.01
                     if (now - last_frame_post_time) < min_interframe_delay:
                         remaining_frame_delay = min_interframe_delay - (now - last_frame_post_time)
-                    gevent.sleep(remaining_frame_delay)
                     
-                    last_frame_post_time = time.time()
+                    print( f"remaining_frame_delay={remaining_frame_delay} original delay={(now - last_frame_post_time)} min_interframe={min_interframe_delay}" )
+                    
+                    
+                    gevent.sleep(remaining_frame_delay)
+                    last_frame_post_time = now
                 else:
                     gevent.sleep(0.01)
                    
             yield (b'--frame\r\n'
                    b'Content-Type: image/png\r\n\r\n' + CameraHandler.create_message_image("Logged out") + b'\r\n')
         except (GeneratorExit, GreenletExit):
+            print("Generator yield exit")
             return
         finally:
             self.remove_viewing_user_stop_camera( username )

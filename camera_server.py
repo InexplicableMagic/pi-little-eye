@@ -138,7 +138,6 @@ def log_entry( level, log_type, message, alert = False, ip_route=None, username=
     dbch.write_log_line( level, alert, username, ip_route, log_type, message )
 
 @app.route('/api/v1/video/mjpeg', methods=['GET'])
-@nocache
 def video_mjpeg():
     authenticated = False
     if dbch.is_ip_list_allowed( get_list_of_possible_client_ips() ):
@@ -160,7 +159,13 @@ def video_mjpeg():
 
                 # If authentication was successful, return the video feed
                 log_entry( 'info', 'video_viewed', f"Camera viewed", username=username )
-                return Response(ch.generate_camera_video(username), content_type='multipart/x-mixed-replace; boundary=frame', direct_passthrough=True)
+                response = Response(ch.generate_camera_video(username), content_type='multipart/x-mixed-replace; boundary=frame', direct_passthrough=True)
+                response.headers['Connection'] = 'close'
+                response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, pre-check=0, post-check=0, max-age=0'
+                response.headers['Pragma'] = 'no-cache'
+                response.headers['Keep-Alive'] = 'timeout=0, max=0'
+                response.headers['Expires'] = '0'
+                return response        
             except RuntimeError as e:
                 return Response(CameraHandler.create_message_image("Camera Failure (see logs)"),mimetype='image/png')
             except Exception as e:
@@ -671,8 +676,7 @@ def index():
         response.set_cookie('csrf_token', csrf_token, httponly=True, secure=True, samesite='Strict')
     log_entry( 'info', 'index_page', 'Front page accessed' )
     return response
-
-
+    
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Raspberry Pi Security Camera")
     # Add the arguments
@@ -738,6 +742,9 @@ if __name__ == '__main__':
 
     gevent.spawn(reload_certificate_periodically)
 
-    pywsgi.WSGIServer.handler_class.protocol = "HTTP/1.0"
+    
+    pywsgi.WSGIServer.handler_class.protocol = "HTTP/1.1"
     http_server = pywsgi.WSGIServer( (args.host, args.port), app, ssl_context=ssl_context )
     http_server.serve_forever()
+    
+    
