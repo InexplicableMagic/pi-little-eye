@@ -1,10 +1,7 @@
 import os
-from gevent import monkey
-monkey.patch_all()
 
 import cv2
 import numpy as np
-from gevent import GreenletExit
 from datetime import datetime, timedelta
 from picamera2 import Picamera2
 from functools import wraps
@@ -12,13 +9,11 @@ import threading
 import time
 import copy
 import gc
-import gevent
 import logging
 import io
 from multiprocessing import get_context, shared_memory, Pipe
 
 from PIL import Image, ImageDraw
-
 
 from .db_config_handler import *
 
@@ -520,7 +515,6 @@ class CameraHandler:
             while self.is_user_viewing(username):
                 new_frame = False
                 
-                
                 # Check if a new frame ID exists
                 if self.frame_id.value > 0 and last_posted_frame < self.frame_id.value:
                     if self.frame_gen_lock.acquire(block=False):
@@ -563,18 +557,15 @@ class CameraHandler:
                     
                     print( f"remaining_frame_delay={remaining_frame_delay} original delay={(now - last_frame_post_time)} min_interframe={min_interframe_delay}" )
                     
-                    
-                    gevent.sleep(remaining_frame_delay)
+                    time.sleep(remaining_frame_delay)
                     last_frame_post_time = now
                 else:
-                    gevent.sleep(0.01)
+                    time.sleep(0.01)
                    
             yield (b'--frame\r\n'
                    b'Content-Type: image/png\r\n\r\n' + CameraHandler.create_message_image("Logged out") + b'\r\n')
-        except (GeneratorExit, GreenletExit):
+        except GeneratorExit:
             print("Generator yield exit")
             return
         finally:
             self.remove_viewing_user_stop_camera( username )
-    
- 

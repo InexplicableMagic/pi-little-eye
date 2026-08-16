@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-from gevent import monkey
-monkey.patch_all()
-
 from flask import Flask, Response, request, render_template, jsonify, make_response, send_from_directory, send_file, abort
-from gevent import pywsgi
-from gevent import ssl as gevent_ssl
 from pi_little_eye.db_config_handler import *
 from pi_little_eye.camera_handler import *
 from pi_little_eye.certificate_handler import *
@@ -12,6 +7,14 @@ import uuid
 import argparse
 import ssl
 import secrets
+import time
+import threading
+import signal
+import logging
+import os
+import sys
+from functools import wraps
+from gunicorn.app.base import BaseApplication
 
 app = Flask(__name__)
 
@@ -39,26 +42,26 @@ def limit_content_length(f):
             abort(413)
         return f(*args, **kwargs)
     return wrapper_function
-    
-# Suppress exeptions being printed to the terminal due to using the self-sign certificate usage
-# These errors come up when the user is informed in the browser the cert is self-signed
-# and the browser interrupts the connection
-def suppress_bad_certificate_errors(context, type, value, tb):
-    msg_lower = str(value).lower()
-    if type is ssl.SSLError and (
-        "sslv3 alert bad certificate" in msg_lower or
-	"ssl/tls alert bad certificate" in msg_lower or
-        "alert certificate unknown" in msg_lower or
-        "eof occurred in violation of protocol" in msg_lower or 
-        "tlsv1_alert_unknown_ca" in msg_lower or
-        "http request" in msg_lower
-    ):
-        return  # Suppress error
-    if type is ssl.SSLEOFError:
-        return  # Suppress this error as well
-        
-    # Call the original handler for all other errors
-    original_error_handler(context, type, value, tb)
+
+class SSLErrorFilter(logging.Filter):
+    """
+    Suppress exceptions being printed to the terminal due to using self-signed certificate usage.
+    These errors come up when the user is informed in the browser the cert is self-signed
+    and the browser interrupts the connection.
+    """
+    def filter(self, record):
+        msg_lower = str(record.getMessage()).lower()
+        if any(err in msg_lower for err in [
+            "sslv3 alert bad certificate",
+            "ssl/tls alert bad certificate",
+            "alert certificate unknown",
+            "eof occurred in violation of protocol",
+            "tlsv1_alert_unknown_ca",
+            "http request",
+            "ssleoferror"
+        ]):
+            return False
+        return True
 
 def check_command_line_args(args, parser):
     if (args.certificate and not args.key) or (args.key and not args.certificate):
@@ -89,7 +92,6 @@ def get_list_of_possible_client_ips():
                         possible_client_ips.append( possible_untrusted_ip )
 
     return possible_client_ips
-
 
 def is_appkey_authenticated( appkey, secret ):
     if dbch.is_ip_list_allowed( get_list_of_possible_client_ips() ):
@@ -362,7 +364,6 @@ def log_management():
         
     return response
 
-   
 # Lock/unlock or delete a user account
 @app.route('/api/v1/account-management', methods=['POST'] )
 @limit_content_length
@@ -430,7 +431,6 @@ def get_challenge():
     else:
         log_entry( 'warning', 'ip_block', f"Attempt to retrieve challenge token from blocked IP", alert=True )
         return make_response( jsonify( { 'error': True, 'message':'IP disallowed' } ), 403)
-        
 
 @app.route('/api/v1/login', methods=['POST'] )
 @limit_content_length
@@ -637,8 +637,6 @@ def delete_app_key():
     return response
 
 #Allow download of a certificate authority that matches the self-signed certificate
-
-
 @app.route('/download/ca-certificate', methods=['GET'])
 def download_ca_certificate():
     (authenticated, message, http_code, username_authenticated) = is_cookie_authenticated( )
@@ -657,12 +655,10 @@ def download_ca_certificate():
         log_entry( 'warning', 'cert', 'Unauthenticated attempt to download CA certificate', alert=True )
         abort(401, description="Access not authorised")
 
-
 @app.route('/robots.txt')
 def static_from_root():
     log_entry( 'warning', 'robots', 'robots.txt file was requested. This may indicate a web search engine has discovered this camera.', alert=True )
     return send_from_directory(app.static_folder, request.path[1:])
-
 
 @app.route('/')
 @nocache
@@ -678,6 +674,21 @@ def index():
         response.set_cookie('csrf_token', csrf_token, httponly=True, secure=True, samesite='Strict')
     log_entry( 'info', 'index_page', 'Front page accessed' )
     return response
+
+class StandaloneApplication(BaseApplication):
+    def __init__(self, app, options=None):
+        self.options = options or {}
+        self.application = app
+        super().__init__()
+
+    def load_config(self):
+        config = {key: value for key, value in self.options.items()
+                  if key in self.cfg.settings and value is not None}
+        for key, value in config.items():
+            self.cfg.set(key.lower(), value)
+
+    def load(self):
+        return self.application
     
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Raspberry Pi Security Camera")
@@ -698,11 +709,9 @@ if __name__ == '__main__':
     dbch.write_log_line( 'info', False, '','', 'software_started', 'Software started' )
     # Option to enable access if the user has locked themselves out due to incorrect IP whitelist settings
     if args.disable_ip_lists:
-        self.write_log_line( 'warning', True, '','', 'ip_disable', 'IP whitelist/blocklist disabled via command line' )
+        dbch.write_log_line( 'warning', True, '','', 'ip_disable', 'IP whitelist/blocklist disabled via command line' )
         dbch.disable_ip_whitelist_and_blocklist()
-    # Suppress exceptions caused by self-sign certificate usage being printed to the terminal
-    original_error_handler = gevent.get_hub().handle_error
-    gevent.get_hub().handle_error = suppress_bad_certificate_errors
+        
     # User supplies their own certificate option
     using_own_certificate = bool(args.certificate and args.key)
     if using_own_certificate:
@@ -719,34 +728,38 @@ if __name__ == '__main__':
         keyfile = CertificateHandler.get_key_file_path()
         certfile = CertificateHandler.get_cert_file_path()
 
-    # Build a long-lived SSLContext so certificates can be rotated without
-    # dropping already-established connections (e.g. an in-progress video feed).
-    # IMPORTANT: this must be gevent's SSLContext (from gevent.ssl), not the
-    # standard library's ssl.SSLContext. 
-    ssl_context = gevent_ssl.SSLContext(gevent_ssl.PROTOCOL_TLS_SERVER)
-    ssl_context.load_cert_chain(certfile, keyfile)
-
     # Do a certificate reload once a day
     def reload_certificate_periodically():
         while True:
-            gevent.sleep(86400)  # one a day
+            time.sleep(86400)  # once a day
             try:
                 if not using_own_certificate:
                     # Regenerates the self-signed cert only if it's actually
                     # close to expiry; assumed to be a no-op otherwise
                     CertificateHandler.update_tls_certificates()
-                # Re-read from disk and apply to the *same* context object.
-                # New connections pick this up; existing ones are untouched.
-                ssl_context.load_cert_chain(certfile, keyfile)
-                dbch.write_log_line( 'info', False, '', '', 'cert_reload', 'TLS certificate reloaded' )
+                
+                # Send SIGHUP to the Gunicorn master process gracefully reload workers and pick up new certs
+                # Existing streams will finish up on the old worker safely
+                os.kill(os.getpid(), signal.SIGHUP)
+                dbch.write_log_line( 'info', False, '', '', 'cert_reload', 'TLS certificate reloaded via SIGHUP' )
             except Exception as e:
                 dbch.write_log_line( 'error', False, '', '', 'cert_reload_failed', f'TLS certificate reload failed: {e}' )
 
-    gevent.spawn(reload_certificate_periodically)
+    threading.Thread(target=reload_certificate_periodically, daemon=True).start()
 
+    # Suppress certificate errors printed to logs on ungraceful browser aborts
+    logging.getLogger("gunicorn.error").addFilter(SSLErrorFilter())
+
+    # Boot via gunicorn internally instead of gevent WSGIServer
+    options = {
+        'bind': f"{args.host}:{args.port}",
+        'workers': 1,
+        'threads': 10,
+        'worker_class': 'gthread',
+        'certfile': certfile,
+        'keyfile': keyfile,
+        'timeout': 0, # Ensures streaming never gets forcefully terminated
+        'preload_app': True 
+    }
     
-    pywsgi.WSGIServer.handler_class.protocol = "HTTP/1.1"
-    http_server = pywsgi.WSGIServer( (args.host, args.port), app, ssl_context=ssl_context )
-    http_server.serve_forever()
-    
-    
+    StandaloneApplication(app, options).run()
