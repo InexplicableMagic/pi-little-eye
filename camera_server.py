@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from gevent import monkey
+monkey.patch_all()
 
 from flask import Flask, Response, request, render_template, jsonify, make_response, send_from_directory, send_file, abort
 from gevent import pywsgi

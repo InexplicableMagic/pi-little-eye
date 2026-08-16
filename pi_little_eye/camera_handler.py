@@ -1,3 +1,4 @@
+import os
 from gevent import monkey
 monkey.patch_all()
 
@@ -10,7 +11,6 @@ from functools import wraps
 import threading
 import time
 import copy
-import os
 import gc
 import gevent
 import logging
@@ -492,36 +492,13 @@ class CameraHandler:
     
     
     # Get a realistic number for the maximum transfer rate on the pi wifi in MBytes/s
+    # Used to limit throughput to a sensible level
+    # TODO: Problem using gpiozero pi_info() which is incompatible with gevent and hangs
     def get_pi_max_wifi_rate( self ):
         return 3
     
-    """
-        Tear and stream stop problem:
-        
-        OK, the issue was that you're exceeding the pi wi-fi bandwidth.
-        Pi Zero 2W max theoretical network capacity = 72.2Mbps.
-        Practically it is 40% of this.
-        Peak throughput 2.75 = 4.4Mbytes/s
-        When you open two video streams at max resolution, this is exceededing the network bandwidth massively.
-        
-        There was a bug in the JavaScript where you opened two streams simultaneously by mistake for each UI.
-        This caused the bandwidth to be exceeded and then it cancelled the stream.
-        
-        The bug is now fixed and you only open one stream at once.
-        However if you have two sessions running then you exceed the bandwidth again
-        So need to dial back the frame rate as more streams are opened.
-        
-        You need to get maximum capacity of pi network on different models of pi and dial down the image size so it fits the model
-        Pi 4 and 5 have much better bandwdith than the zero.
-        Reduce the compression.
-        Divide down the network capacity by the number of users.
-        
-    """
-    
     def generate_camera_video(self, username):            
         username = username.lower()
-        
-        
         
         yield (b'--frame\r\n'
                    b'Content-Type: image/png\r\n\r\n' + CameraHandler.create_message_image("Camera starting...") + b'\r\n')
@@ -530,6 +507,9 @@ class CameraHandler:
         # Estimate a realistic number for the maximum wi-fi transfer capability of the pi
         # in bytes/s. We will try and avoid exceeding this
         max_rate_bytes_s = self.get_pi_max_wifi_rate()*1024*1024  
+        
+        print(max_rate_bytes_s)
+        
         # The minimum time between frames to avoid swamping the wifi
         min_interframe_delay = 1/30 
 
