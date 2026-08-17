@@ -3,6 +3,7 @@ import stat
 import socket
 import subprocess
 import ipaddress
+import shutil
 
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import serialization, hashes
@@ -31,7 +32,7 @@ class CertificateHandler:
 
     # User-added SAN entries (e.g. via a CLI flag), persisted across restarts
     # and renewals so they aren't lost when the leaf is reissued.
-    EXTRA_NAMES_FNAME = "extra_names.txt"
+    EXTRA_NAMES_FNAME = "additional_san_names.txt"
 
     def get_ca_cert_file_path():
         return os.path.join(CertificateHandler.CERTIFICATES_DIR, CertificateHandler.CA_CERTIFICATE_FNAME)
@@ -231,13 +232,16 @@ class CertificateHandler:
     # ---------- key generation ----------
 
     def generate_ecc_private_key(pem_private_key_fname):
+        pem_private_key_fname_temp = pem_private_key_fname+".writing"
+    
         private_key = ec.generate_private_key(ec.SECP256R1())
-        with open(pem_private_key_fname, "wb") as f:
+        with open(pem_private_key_fname_temp, "wb") as f:
             f.write(private_key.private_bytes(
                 encoding=serialization.Encoding.PEM,
                 format=serialization.PrivateFormat.TraditionalOpenSSL,
                 encryption_algorithm=serialization.NoEncryption()
             ))
+        shutil.move( pem_private_key_fname_temp, pem_private_key_fname )
         os.chmod(pem_private_key_fname, stat.S_IRUSR | stat.S_IWUSR)
         return private_key
 
@@ -253,8 +257,8 @@ class CertificateHandler:
         private_key = CertificateHandler.generate_ecc_private_key(pem_private_key_fname)
 
         subject = issuer = x509.Name([
-            x509.NameAttribute(NameOID.ORGANIZATION_NAME, u"Raspberry Pi Security Camera"),
-            x509.NameAttribute(NameOID.COMMON_NAME, u"Raspberry Pi Security Camera Root CA"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, u"Pi Little Eye"),
+            x509.NameAttribute(NameOID.COMMON_NAME, u"Pi Little Eye Root CA"),
         ])
 
         now = datetime.now(timezone.utc)
@@ -292,8 +296,11 @@ class CertificateHandler:
             critical=False,
         ).sign(private_key, hashes.SHA256())
 
-        with open(pem_certificate_fname, "wb") as f:
+        # Create it to a temp file and then move it over the top to make it atomic
+        pem_certificate_fname_temp = pem_certificate_fname+".writing"
+        with open(pem_certificate_fname_temp, "wb") as f:
             f.write(certificate.public_bytes(serialization.Encoding.PEM))
+        shutil.move( pem_certificate_fname_temp, pem_certificate_fname )
         os.chmod(pem_certificate_fname, stat.S_IRUSR | stat.S_IWUSR)
 
         return certificate
@@ -303,7 +310,7 @@ class CertificateHandler:
         private_key = CertificateHandler.generate_ecc_private_key(pem_private_key_fname)
 
         subject = x509.Name([
-            x509.NameAttribute(NameOID.ORGANIZATION_NAME, u"Raspberry Pi Security Camera"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, u"Pi Little Eye"),
             x509.NameAttribute(NameOID.COMMON_NAME, sorted(dns_names)[0]),
         ])
 

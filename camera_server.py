@@ -689,6 +689,15 @@ class StandaloneApplication(BaseApplication):
 
     def load(self):
         return self.application
+        
+def check_cert_validity():
+    while True:
+        time.sleep(86400)
+        if not using_own_certificate:
+            # Regenerates self-signed cert if near expiry
+            # Apparently gunicorn auto-rereads the certificate/key files on every connection
+            # therefore there is no need to inform gunicorn of the update
+            CertificateHandler.update_tls_certificates()
     
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Raspberry Pi Security Camera")
@@ -727,25 +736,8 @@ if __name__ == '__main__':
             sys.exit(0)
         keyfile = CertificateHandler.get_key_file_path()
         certfile = CertificateHandler.get_cert_file_path()
-
-    # Do a certificate reload once a day
-    def reload_certificate_periodically():
-        while True:
-            time.sleep(86400)  # once a day
-            try:
-                if not using_own_certificate:
-                    # Regenerates the self-signed cert only if it's actually
-                    # close to expiry; assumed to be a no-op otherwise
-                    CertificateHandler.update_tls_certificates()
-                
-                # Send SIGHUP to the Gunicorn master process gracefully reload workers and pick up new certs
-                # Existing streams will finish up on the old worker safely
-                os.kill(os.getpid(), signal.SIGHUP)
-                dbch.write_log_line( 'info', False, '', '', 'cert_reload', 'TLS certificate reloaded via SIGHUP' )
-            except Exception as e:
-                dbch.write_log_line( 'error', False, '', '', 'cert_reload_failed', f'TLS certificate reload failed: {e}' )
-
-    threading.Thread(target=reload_certificate_periodically, daemon=True).start()
+            
+    threading.Thread(target=check_cert_validity, daemon=True).start()
 
     # Suppress certificate errors printed to logs on ungraceful browser aborts
     logging.getLogger("gunicorn.error").addFilter(SSLErrorFilter())
