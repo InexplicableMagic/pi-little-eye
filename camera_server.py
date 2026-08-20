@@ -689,10 +689,40 @@ class StandaloneApplication(BaseApplication):
 
     def load(self):
         return self.application
-        
+
+stop_event = threading.Event()
+cert_validity_thread = None
+ch = None
+
+# Runs on gunicorn exit to do cleanup of various background processes/threads that started
+def on_exit(server):
+    stop_event.set()  # Wakes up .wait() instantly
+    if cert_validity_thread and cert_validity_thread.is_alive():
+        cert_validity_thread.join(timeout=5)
+    if ch:
+        ch.close_down()
+
+# Prevents the gunicorn worker process (forked on boot) trying to handle cleanup of the camera frame producer process
+# which is created independently. This runs just after gunicorn forks from the main process and wipes its knowledge of 
+# the camera process
+def post_fork(server, worker):
+    import multiprocessing.process
+    import multiprocessing.util
+    from multiprocessing import resource_tracker
+
+    if hasattr(multiprocessing.process, "_children"):
+        multiprocessing.process._children.clear()
+    if hasattr(multiprocessing.util, "_children"):
+        multiprocessing.util._children.clear()
+
+    if getattr(resource_tracker, "_resource_tracker", None) is not None:
+        resource_tracker._resource_tracker._fd = None
+        resource_tracker._resource_tracker._pid = None
+        resource_tracker._resource_tracker = None
+
+# Periodically check if we need a new self-signed certificate creating
 def check_cert_validity():
-    while True:
-        time.sleep(86400)
+    while not stop_event.wait(timeout=86400):
         if not using_own_certificate:
             # Regenerates self-signed cert if near expiry
             # Apparently gunicorn auto-rereads the certificate/key files on every connection
@@ -737,7 +767,8 @@ if __name__ == '__main__':
         keyfile = CertificateHandler.get_key_file_path()
         certfile = CertificateHandler.get_cert_file_path()
             
-    threading.Thread(target=check_cert_validity, daemon=True).start()
+    cert_validity_thread = threading.Thread(target=check_cert_validity, daemon=True)
+    cert_validity_thread.start()
 
     # Suppress certificate errors printed to logs on ungraceful browser aborts
     logging.getLogger("gunicorn.error").addFilter(SSLErrorFilter())
@@ -751,7 +782,10 @@ if __name__ == '__main__':
         'certfile': certfile,
         'keyfile': keyfile,
         'timeout': 0, # Ensures streaming never gets forcefully terminated
-        'preload_app': True 
+        'graceful_timeout': 1, # Terminate streams on exit after 1 second
+        'preload_app': True,
+        'on_exit': on_exit,
+        'post_fork': post_fork
     }
     
     StandaloneApplication(app, options).run()

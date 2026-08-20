@@ -55,12 +55,12 @@ class CameraHandler:
             self.camera_control_pipe, child_cam_control_pipe = Pipe()
             
             camera_initial_params = self.generate_camera_parameter_message(camera_restart=True)
-            cam = ctx.Process(
+            self.camera_process = ctx.Process(
                 target=CameraHandler.bg_image_producer,
                 args=(self.bg_shared_mem.name, self.frame_gen_lock, self.frame_len, self.frame_id, child_cam_control_pipe, camera_initial_params ),
-                daemon=True,
+                daemon=False,
             )
-            cam.start()  
+            self.camera_process.start()  
         
     def generate_camera_parameter_message( self, camera_restart=False ):
         cam_param_block = {
@@ -84,7 +84,25 @@ class CameraHandler:
                     'paused': new_state
                 }
                 self.camera_control_pipe.send( msg )
-        
+                
+    def close_down( self ):
+    
+        # Close down background process that generates camera frames
+        with self.camera_state_change_lock:
+            msg = { 'stop': True }
+            self.camera_control_pipe.send( msg )
+        self.camera_process.join( timeout=5 )
+        if self.camera_process.is_alive():
+            self.camera_process.terminate()
+            self.camera_process.join( timeout=1 )  # Reclaim PID from process table
+            
+        # Close down shared memory used to transmit frames from the camera
+        try:
+            self.bg_shared_mem.close()
+            self.bg_shared_mem.unlink()
+        except Exception:
+            pass
+            
     
     # Starts in the paused state and then needs waking up to generate images
     @staticmethod
@@ -107,6 +125,9 @@ class CameraHandler:
                     if msg is not None:
                         if 'paused' in msg:
                             paused = msg['paused']
+                        elif 'stop' in msg:
+                            if msg['stop']:
+                                running = False
                         else:
                             params = msg
                             parameter_change = True
@@ -488,7 +509,6 @@ class CameraHandler:
     
     # Get a realistic number for the maximum transfer rate on the pi wifi in MBytes/s
     # Used to limit throughput to a sensible level
-    # TODO: Problem using gpiozero pi_info() which is incompatible with gevent and hangs
     def get_pi_max_wifi_rate( self ):
         return 3
     
