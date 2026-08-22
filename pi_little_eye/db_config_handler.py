@@ -16,6 +16,8 @@ import sys
 import threading
 import secrets
 
+from .pi_hardware import pi_hardware
+
 class DBConfigHandler:
     
     MAX_PASS_LENGTH = 100
@@ -173,6 +175,8 @@ class DBConfigHandler:
             self.insert_or_update_parameter( 'timestamp_position', 'string' , 'bottom-right')
             # Whether the timestamp should be displayed
             self.insert_or_update_parameter( 'display_timestamp', 'bool', True )
+            # Maximum wi-fi bandwidth to use
+            self.insert_or_update_parameter( 'max_wifi_bandwidth', 'float', float(pi_hardware.get_suggested_max_wifi_bandwidth()) )
 
         ip_lists = self.get_ip_allow_list()
         self.ip_response = dict()
@@ -1182,14 +1186,16 @@ class DBConfigHandler:
                         'timestamp_scale': self.get_parameter_value('timestamp_scale_factor'),
                         'display_timestamp': self.get_parameter_value('display_timestamp'),
                         'timestamp_position': self.get_parameter_value('timestamp_position'),
-                        'display_timestamp': self.get_parameter_value('display_timestamp')
+                        'display_timestamp': self.get_parameter_value('display_timestamp'),
+                        'max_wifi_bandwidth': self.get_parameter_value('max_wifi_bandwidth')
                    }
             
         return config_data
 
     def validate_config_object( config_object ):
         if config_object:
-            keys = [ 'allowed_ips', 'enforce_ip_whitelist', 'enforce_ip_blocklist', 'image_rotation', 'timestamp_position', 'display_timestamp' ]
+            keys = [ 'allowed_ips', 'enforce_ip_whitelist', 'enforce_ip_blocklist', 
+                     'image_rotation', 'timestamp_position', 'display_timestamp', 'max_wifi_bandwidth' ]
             for key in keys:
                 if key not in config_object:
                     return False
@@ -1213,6 +1219,10 @@ class DBConfigHandler:
                 return False
             if not isinstance( config_object['display_timestamp'], bool ):
                 return False
+            if not isinstance(config_object['max_wifi_bandwidth'], (int, float)):
+                return False
+            if config_object['max_wifi_bandwidth'] < 0.1 or config_object['max_wifi_bandwidth'] > 100000:
+                return False
             
             normalised_whitelisted = []
             for ip in config_object['allowed_ips']['whitelisted']:
@@ -1227,7 +1237,7 @@ class DBConfigHandler:
             for ip in (config_object['allowed_ips']['whitelisted'] + config_object['allowed_ips']['blacklisted']):
                 if not DBConfigHandler.is_valid_ipv4_or_ipv6_wildcard_range( ip ):
                     return False
-            
+
             return True
         
         return False
@@ -1256,6 +1266,9 @@ class DBConfigHandler:
                     self.insert_or_update_parameter( 'timestamp_scale_factor', 'string' , config_object['timestamp_scale'] )
                 if 'display_timestamp' in config_object:
                     self.insert_or_update_parameter( 'display_timestamp', 'bool' , config_object['display_timestamp'] )
+                if 'max_wifi_bandwidth' in config_object:
+                    self.insert_or_update_parameter( 'max_wifi_bandwidth', 'float', float(config_object['max_wifi_bandwidth']) )
+                    
     
     def validate_appkey_auth( self, appkey, secret ):
         try:                    

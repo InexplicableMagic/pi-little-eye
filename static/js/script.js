@@ -307,6 +307,9 @@ function resetConfigOnUI(){
             
             const timeStampScaleSelect = document.getElementById('timestamp-text-size');
             timeStampScaleSelect.value = config.timestamp_scale
+
+            const maxWifiBandwidthEntry = document.getElementById( 'max-wifi-bandwidth' );
+            maxWifiBandwidthEntry.value = config.max_wifi_bandwidth
             
             generateUserListTable( config.usernames, config.current_username, 'user-list-table' );
             generateAppKeyTable( config.app_keys, 'app-key-list-table' );
@@ -352,6 +355,35 @@ function setupTextAreaValidation(textAreaId) {
   });
 }
 
+function validateNumberInputAreaInRange( inputArea, min, max ) {
+    const currentValue = Number(inputArea.value);
+    if(currentValue >= min && currentValue <= max){
+        inputArea.style.border = '';
+        return true;
+    }else{
+        inputArea.style.border = '4px solid red';
+        return false;
+    }
+}
+
+function setupInputAreaNumberValidation( inputAreaId, min, max, doSaveConfig ){
+    const inputArea = document.getElementById(inputAreaId);
+
+    let debounceTimeout;
+    
+    inputArea.addEventListener('input', function() {
+        clearTimeout( debounceTimeout )
+
+        debounceTimeout = setTimeout(() => {
+            if( validateNumberInputAreaInRange(this, min, max) ){
+                if(doSaveConfig){
+                    saveConfig();            
+                }
+            }
+        }, 500);
+    });
+}
+
 function convertConfigUIStateToJSON(){
     const ipWhitelistTextArea = document.getElementById('allowed-ip-list');
     const ipBlocklistTextArea = document.getElementById('blocked-ip-list');
@@ -359,6 +391,7 @@ function convertConfigUIStateToJSON(){
     const timeStampScaleSelect = document.getElementById('timestamp-text-size');
     const timestampPositionSelect = document.getElementById('timestamp-position-select');
     const displayTimestampCheckbox = document.getElementById('display-timestamp');
+    const maxWifiBandwidthEntry = document.getElementById( 'max-wifi-bandwidth' );
     
     allowed_ip_listing_array = convertStringListToArray( lastValidIPAllowList )
     blocked_ip_listing_array = convertStringListToArray( lastValidIPBlockList )
@@ -382,7 +415,8 @@ function convertConfigUIStateToJSON(){
                image_rotation: Number(rotationSelect.value),
                timestamp_scale: timeStampScaleSelect.value,
                timestamp_position: timestampPositionSelect.value,
-               display_timestamp: displayTimestampCheckbox.checked
+               display_timestamp: displayTimestampCheckbox.checked,
+               max_wifi_bandwidth: Number(maxWifiBandwidthEntry.value)
         };
         return postObject;
         
@@ -934,12 +968,9 @@ function addEventListeners() {
     
     document.addEventListener('DOMContentLoaded', function() {
         setupTextAreaValidation('allowed-ip-list');
-    });
-
-    document.addEventListener('DOMContentLoaded', function() {
         setupTextAreaValidation('blocked-ip-list');
+        setupInputAreaNumberValidation( 'max-wifi-bandwidth', 0.1, 100000, true )
     });
-
    
     // Restart the video if the page becomes visible after previously being hidden
     document.addEventListener('visibilitychange', function() {

@@ -85,9 +85,8 @@ class CertificateHandler:
 
         return names
 
-    # Every IP a browser might be pointed at. IPAddress entries (not DNSName —
-    # browsers only match "https://1.2.3.4/" against an IPAddress SAN, and
-    # will warn even on a correct DNSName entry containing the same text).
+    # Attempt to determine every possible name and IP address that the Pi might be known as
+    # for the SAN list in the certicate
     def discover_ip_addresses():
         ips = {"127.0.0.1", "::1"}
 
@@ -123,8 +122,6 @@ class CertificateHandler:
                 continue
 
         return valid_ips
-
-    # ---------- top level entry point ----------
 
     def update_tls_certificates():
         if not os.path.exists(CertificateHandler.CERTIFICATES_DIR):
@@ -187,12 +184,6 @@ class CertificateHandler:
                 dns_names.add(name)
         return dns_names, ip_addresses
 
-    # Call this to add an extra name (a DNS name, or an IP address as a
-    # string) that the camera should also be reachable/trusted under —
-    # e.g. from a "--add-hostname" CLI flag. Persists the name to disk and
-    # immediately reissues the leaf certificate, signed by the existing CA,
-    # covering the union of every previously known name/IP plus this one.
-    # No client-side action is needed afterwards, since the CA hasn't changed.
     def add_dns_name_to_certificate(additional_name):
         additional_name = additional_name.strip()
         if not additional_name:
@@ -229,8 +220,6 @@ class CertificateHandler:
             ca_private_key, ca_certificate, key_path, cert_path, dns_names, ip_addresses
         )
 
-    # ---------- key generation ----------
-
     def generate_ecc_private_key(pem_private_key_fname):
         pem_private_key_fname_temp = pem_private_key_fname+".writing"
     
@@ -257,8 +246,8 @@ class CertificateHandler:
         private_key = CertificateHandler.generate_ecc_private_key(pem_private_key_fname)
 
         subject = issuer = x509.Name([
-            x509.NameAttribute(NameOID.ORGANIZATION_NAME, u"Pi Little Eye"),
-            x509.NameAttribute(NameOID.COMMON_NAME, u"Pi Little Eye Root CA"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Pi Little Eye"),
+            x509.NameAttribute(NameOID.COMMON_NAME, "Pi Little Eye Root CA"),
         ])
 
         now = datetime.now(timezone.utc)
@@ -366,9 +355,7 @@ class CertificateHandler:
         now = datetime.now(timezone.utc)
         return now + timedelta(days=buffer_days) > cert.not_valid_after_utc
 
-    # Returns False (forcing reissue) if the cert on disk is missing any
-    # hostname/IP the Pi currently answers to — e.g. DHCP handed it a new
-    # address since the cert was issued.
+
     def certificate_covers_names(pem_certificate_fname, required_dns_names, required_ip_addresses):
         try:
             cert = CertificateHandler.load_certificate(pem_certificate_fname)

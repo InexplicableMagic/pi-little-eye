@@ -506,12 +506,7 @@ class CameraHandler:
         with self.update_login_lock:
             return sum(self.logged_in_users.values())
     
-    
-    # Get a realistic number for the maximum transfer rate on the pi wifi in MBytes/s
-    # Used to limit throughput to a sensible level
-    def get_pi_max_wifi_rate( self ):
-        return 3
-    
+       
     def generate_camera_video(self, username):            
         username = username.lower()
         
@@ -521,7 +516,7 @@ class CameraHandler:
         self.add_viewing_start_camera(username)
         # Estimate a realistic number for the maximum wi-fi transfer capability of the pi
         # in bytes/s. We will try and avoid exceeding this
-        max_rate_bytes_s = self.get_pi_max_wifi_rate()*1024*1024  
+        max_rate_bytes_s = self.config.get_parameter_value('max_wifi_bandwidth')*1024*1024  
         
         print(max_rate_bytes_s)
         
