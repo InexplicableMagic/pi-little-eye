@@ -41,7 +41,10 @@ class CameraHandler:
         self.camera_detected = False
         self.available_resolutions = []
         resolutions = self.__enumerate_resolutions( self.selected_camera_number )
+        self.resolutions_wh = []
+        # Resolutions as a simple list of widths and heights
         if resolutions != None and len(resolutions) > 0:
+            self.resolutions_wh = CameraHandler.resolutions_to_width_height_list( resolutions )
             self.available_resolutions = resolutions
             self.current_resolution = CameraHandler.__suggest_camera_resolution( resolutions, self.user_selected_res )
             self.camera_detected = True
@@ -150,10 +153,11 @@ class CameraHandler:
                         picam2 = Picamera2(params['selected_camera_number'])
                         
                         # Determine the FPS the sensor can do at this resolution and lock the FPS to that
-                        max_hardware_fps = max(m['fps'] for m in picam2.sensor_modes if m['size'] == params['resolution'])
+                        max_hardware_fps = params['resolution']['max_fps']
                         camera_fps = min(max_fps, max_hardware_fps)                        
                         config = picam2.create_preview_configuration(
-                            main={"format": 'YUV420', "size": params['resolution']}
+                            main={  "format": 'YUV420', "size": params['resolution']['resolution'] },
+                            raw={"size": params['resolution']['sensor_raw']}
                         )
                         picam2.configure(config)
                         picam2.set_controls({"FrameRate": camera_fps})
@@ -170,7 +174,7 @@ class CameraHandler:
                     else:
                         rotate_fn = None
                     
-                    timestamp_params = CameraHandler.recalculate_timestamp_text_position( params['timestamp_scale_name'], params['resolution'][0] ,params['resolution'][1] , params['rotation'], params['timestamp_position'] )
+                    timestamp_params = CameraHandler.recalculate_timestamp_text_position( params['timestamp_scale_name'], params['resolution']['resolution'][0] ,params['resolution']['resolution'][1] , params['rotation'], params['timestamp_position'] )
                     parameter_change = False
                 
                 if not paused:
@@ -197,8 +201,8 @@ class CameraHandler:
                         frame = cv2.cvtColor(yuv_frame, cv2.COLOR_YUV420p2BGR)
 
                         # Crop the final BGR image to configured resolution
-                        config_height = params['resolution'][1]
-                        config_width = params['resolution'][0]
+                        config_height = params['resolution']['resolution'][1]
+                        config_width = params['resolution']['resolution'][0]
                         frame = frame[:config_height, :config_width]
 
                         if rotate_fn is not None:
@@ -302,31 +306,24 @@ class CameraHandler:
                     #Validates the resolution passed in is a mode available on this camera
                     if self.camera_detected:
                         new_resolution = CameraHandler.__suggest_camera_resolution( self.available_resolutions, new_resolution )
-                        if new_resolution[0] != self.current_resolution[0] or new_resolution[1] != self.current_resolution[1]:                            
+                        if new_resolution['resolution'][0] != self.current_resolution['resolution'][0] or new_resolution['resolution'][1] != self.current_resolution['resolution'][1]:                            
                             # Update the config with the selected resolution
                             with self.option_change_lock:
                                 self.current_resolution = new_resolution
-                                self.config.insert_or_update_parameter( 'cam_res_width', 'int', new_resolution[0] )
-                                self.config.insert_or_update_parameter( 'cam_res_height', 'int', new_resolution[1] )
+                                self.config.insert_or_update_parameter( 'cam_res_width', 'int', new_resolution['resolution'][0] )
+                                self.config.insert_or_update_parameter( 'cam_res_height', 'int', new_resolution['resolution'][1] )
                             return True
         return False
                             
 
     def is_camera_detected(self):
         return self.camera_detected
-    
-    # Return the cached version of the available camera resolutions
-    def get_camera_resolutions( self ):
-        return self.available_resolutions
-        
-    def get_camera_current_resolutions( self ):
-        return self.current_resolution
-    
+            
     #Converts the user selected resolution into the nearest actual resolution the camera can do
     def __suggest_camera_resolution( resolution_list, user_res_choice ):
         
         for resolution in resolution_list:
-            if resolution[0] >= user_res_choice[0] and resolution[1] >= user_res_choice[1]:
+            if resolution['resolution'][0] >= user_res_choice[0] and resolution['resolution'][1] >= user_res_choice[1]:
                 return resolution
         
         # If we can't find anything suitable, return the first resolution on the list
@@ -359,20 +356,135 @@ class CameraHandler:
         try:
             pc2 = Picamera2(camera_number)
             sensor_modes = pc2.sensor_modes
+            print(sensor_modes)
             for camfmt in sensor_modes:
+                # Some of the native modes are cropped. Specify which ones are not
+                cropped = False
+                if 'crop_limits' in camfmt:
+                    if camfmt['crop_limits'][0] != 0 or camfmt['crop_limits'][1] != 0:
+                        cropped = True
                 if 'size' in camfmt:
-                    resolutions.append( camfmt['size'] )
+                    resolutions.append( { 'resolution': camfmt['size'], 'max_fps': camfmt['fps'], 'native': True, 'cropped': cropped, 'sensor_raw': camfmt['size'] } )
             pc2.close()
+
+            if len( resolutions ) < 1:
+                return None
+
+
+            resolutions = CameraHandler.sort_resolutions_by_area( resolutions )
+
+            aspect_ratio_str = CameraHandler.classify_aspect_ratio( resolutions[-1]['resolution'][0] , resolutions[-1]['resolution'][1] )
+            resolutions = CameraHandler.append_additional_resolutions( resolutions, aspect_ratio_str )
+            resolutions = CameraHandler.sort_resolutions_by_area( resolutions )
+            print(resolutions)
+            
         except:
             return None
         
         return resolutions
+
+    def sort_resolutions_by_area(resolutions):
+        resolutions.sort(key=lambda x: x['resolution'][0] * x['resolution'][1])
+        return resolutions
+
+    # Get the camera aspect ratio
+    @staticmethod
+    def classify_aspect_ratio(width, height, tolerance=0.01):
+        target_ratio = width / height
+        
+        # Target decimals
+        ratios = {
+            "16:9": 16 / 9,   # ~1.7778
+            "4:3": 4 / 3,     # ~1.3333
+            "16:10": 16 / 10, # 1.6
+            "1:1": 1.0
+        }
+        
+        for name, ideal_value in ratios.items():
+            if abs(target_ratio - ideal_value) <= tolerance:
+                return name
+
+        # Camera has unknown resolution - try 4x3
+        return "4:3"
+
+    @staticmethod
+    def get_nearest_fps(resolutions, target_resolution):
+        if len(resolutions) == 1:
+            return (resolutions[0]['max_fps'], resolutions[0]['resolution'])
+            
+        target_w, target_h = target_resolution
+        
+        # Find the resolution item with the minimum squared Euclidean distance
+        for resolution in resolutions:
+            if resolution['resolution'][0] >= target_w and resolution['resolution'][1] >= target_h and not resolution['cropped']:
+               return (resolution['max_fps'], resolution['resolution'])
+        
+        return (resolutions[-1]['max_fps'], resolutions[-1]['resolution'])
+
+    @staticmethod
+    def resolutions_to_width_height_list( resolution_list ):
+        wh_list = []
+        for resolution in resolution_list:
+            wh_list.append( resolution['resolution'] )
+        return wh_list
+
+    @staticmethod
+    def append_additional_resolutions( resolution_list, aspect_ratio ):
+        additional_resolutions = {
+            "16:9": [
+                {'resolution': (640, 360), 'max_fps': 30},   # nHD
+                {'resolution': (854, 480), 'max_fps': 30},   # FWVGA
+                {'resolution': (960, 540), 'max_fps': 30,},   # qHD
+                {'resolution': (1280, 720), 'max_fps': 30},  # HD standard
+                {'resolution': (1920, 1080), 'max_fps': 30}, # HD full
+            ],
+            "4:3": [
+                {'resolution': (640, 480), 'max_fps': 30},   # VGA
+                {'resolution': (800, 600), 'max_fps': 30},   # SVGA
+                {'resolution': (1024, 768), 'max_fps': 30},  # XGA
+                {'resolution': (1280, 960), 'max_fps': 30},  # SXGA
+                {'resolution': (1600, 1200), 'max_fps': 30}, # UXGA
+            ],
+            "16:10": [
+                {'resolution': (1024, 600), 'max_fps': 30},  # WSVGA
+                {'resolution': (1280, 800), 'max_fps': 30},  # WXGA
+                {'resolution': (1440, 900), 'max_fps': 30},  # WXGA+
+                {'resolution': (1680, 1050), 'max_fps': 30}, # WSXGA+
+                {'resolution': (1920, 1200), 'max_fps': 30}, # WUXGA
+            ],
+            "1:1": [
+                {'resolution': (640, 640), 'max_fps': 30},   # VGA Square
+                {'resolution': (800, 800), 'max_fps': 30},   # SVGA Square
+                {'resolution': (960, 960), 'max_fps': 30},   # HD Square
+                {'resolution': (1280, 1280), 'max_fps': 30}, # Megapixel Square
+                {'resolution': (1536, 1536), 'max_fps': 30}, # High-density square
+            ]
+        }
+
+        additional_res_list = additional_resolutions['4:3']       
+
+        if aspect_ratio in additional_resolutions:
+            additional_res_list = additional_resolutions[aspect_ratio]
+
+        for resolution in additional_res_list:
+            resolution['max_fps'], resolution['sensor_raw'] = CameraHandler.get_nearest_fps( resolution_list,  resolution['resolution'] )
+            resolution['native'] = False
+            resolution['cropped'] = False
+
+        resolution_list.extend( additional_res_list )
+
+        print( resolution_list )
+        return resolution_list
+    
+
+
         
     def append_camera_current_config(self, config):
         config['is_camera_available'] = self.is_camera_detected()
         if self.is_camera_detected():
-            config['available_camera_resolutions'] = self.get_camera_resolutions()
-            config['current_camera_resolution'] = self.get_camera_current_resolutions()
+            config['available_camera_resolutions'] = self.resolutions_wh
+            print( self.resolutions_wh )
+            config['current_camera_resolution'] = self.current_resolution['resolution']
         return config
     
     # When user config options change, or the resolution changes then change the position of the timestamp text on screen
