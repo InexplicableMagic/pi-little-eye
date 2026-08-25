@@ -407,6 +407,15 @@ class CameraHandler:
         # Camera has unknown resolution - try 4x3
         return "4:3"
 
+    # Find out if a resolution already exists in the resolution list
+    @staticmethod
+    def res_already_exists(resolutions, target_resolution):
+        for resolution in resolutions:
+            if resolution['resolution'][0] == target_resolution[0] and resolution['resolution'][1] == target_resolution[1]:
+                return True
+        return False
+
+    # Determine the native FPS and sensor resolution from which a resolution is derived
     @staticmethod
     def get_nearest_fps(resolutions, target_resolution):
         if len(resolutions) == 1:
@@ -428,13 +437,15 @@ class CameraHandler:
             wh_list.append( resolution['resolution'] )
         return wh_list
 
+    # Append a selection of standard lower resolutions that can be scaled
+    # on the Pi's ISP
     @staticmethod
     def append_additional_resolutions( resolution_list, aspect_ratio ):
         additional_resolutions = {
             "16:9": [
                 {'resolution': (640, 360), 'max_fps': 30},   # nHD
                 {'resolution': (854, 480), 'max_fps': 30},   # FWVGA
-                {'resolution': (960, 540), 'max_fps': 30,},   # qHD
+                {'resolution': (960, 540), 'max_fps': 30,},  # qHD
                 {'resolution': (1280, 720), 'max_fps': 30},  # HD standard
                 {'resolution': (1920, 1080), 'max_fps': 30}, # HD full
             ],
@@ -466,19 +477,23 @@ class CameraHandler:
         if aspect_ratio in additional_resolutions:
             additional_res_list = additional_resolutions[aspect_ratio]
 
+        # Find the next highest, non-cropped native sensor resolution that is higher than the proposed scaled resolution
+        # Also discover the max FPS that sensor can do at that resolution.
         for resolution in additional_res_list:
             resolution['max_fps'], resolution['sensor_raw'] = CameraHandler.get_nearest_fps( resolution_list,  resolution['resolution'] )
             resolution['native'] = False
             resolution['cropped'] = False
 
-        resolution_list.extend( additional_res_list )
+        # Remove duplicates from the resolution list
+        deduplicated_resolution_list = []
+        deduplicated_resolution_list.extend( resolution_list )
+        for resolution in additional_res_list:
+            if not CameraHandler.res_already_exists( resolution_list, resolution['resolution'] ):
+                deduplicated_resolution_list.append( resolution )
 
-        print( resolution_list )
-        return resolution_list
+        return deduplicated_resolution_list
     
 
-
-        
     def append_camera_current_config(self, config):
         config['is_camera_available'] = self.is_camera_detected()
         if self.is_camera_detected():
