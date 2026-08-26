@@ -175,9 +175,14 @@ class CameraHandler:
                                 main={  "format": 'YUV420', "size": params['selected_resolution']['resolution'] },
                                 raw={"size": params['selected_resolution']['sensor_raw']}
                             )
+                            controls_to_set = {"FrameRate": camera_fps}
+                            # Set autofocus on if the camera supports it
+                            if "AfMode" in picam2.camera_controls:
+                                controls_to_set["AfMode"] = controls.AfModeEnum.Continuous
+                                controls_to_set["AfSpeed"] = controls.AfSpeedEnum.Normal
 
                             picam2.configure(config)
-                            picam2.set_controls({"FrameRate": camera_fps})
+                            picam2.set_controls(controls_to_set)
                         except Exception as e:
                             # On error - try resetting the camera resolution to the minimum
                             # User may have selected too high a resolution
