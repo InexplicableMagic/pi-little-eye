@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 from datetime import datetime, timedelta
 from picamera2 import Picamera2
+from libcamera import controls
 from functools import wraps
 import threading
 import time
@@ -217,7 +218,7 @@ class CameraHandler:
                                 signal.setitimer(signal.ITIMER_REAL, 0)                            
           
                             # Convert full buffer (with padding) to BGR
-                            frame = cv2.cvtColor(yuv_frame, cv2.COLOR_YUV420p2BGR)
+                            frame = cv2.cvtColor(yuv_frame, cv2.COLOR_YUV2BGR_I420)
 
                             # The camera outputted image can be wider than the sensor area due to the inclusion of padding for memory alignment
                             # This crops the image down to the actual user specified resolution
@@ -382,7 +383,6 @@ class CameraHandler:
         try:
             pc2 = Picamera2(camera_number)
             sensor_modes = pc2.sensor_modes
-            print(sensor_modes)
             for camfmt in sensor_modes:
                 # Some of the native modes are cropped. Specify which ones are not
                 cropped = False
