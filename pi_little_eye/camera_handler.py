@@ -11,6 +11,7 @@ import copy
 import gc
 import logging
 import io
+import signal
 from multiprocessing import get_context, shared_memory, Pipe
 
 from PIL import Image, ImageDraw
@@ -67,7 +68,8 @@ class CameraHandler:
         
     def generate_camera_parameter_message( self, camera_restart=False ):
         cam_param_block = {
-            'resolution': self.current_resolution,
+            'selected_resolution': self.current_resolution,
+            'available_resolutions' : self.available_resolutions,
             'selected_camera_number': self.selected_camera_number,
             'timestamp_position': self.timestamp_position,
             'timestamp_scale_name': self.timestamp_scale_name,
@@ -106,6 +108,19 @@ class CameraHandler:
         except Exception:
             pass
             
+    @staticmethod
+    def camera_reset_close(picam2):
+        try:
+            if picam2 is not None:
+                picam2.cancel_all_and_flush()
+                picam2.stop()
+                picam2.close()
+        except Exception:
+            pass
+
+    @staticmethod
+    def raise_timeout(signum, frame):
+        raise TimeoutError("capture_array() timed out")
     
     # Starts in the paused state and then needs waking up to generate images
     @staticmethod
@@ -121,6 +136,8 @@ class CameraHandler:
         rotate_fn = None
         picam2 = None
         paused = True
+
+        signal.signal(signal.SIGALRM, CameraHandler.raise_timeout)
                
         try:
             while running:
@@ -145,22 +162,27 @@ class CameraHandler:
                     if params['camera_restart'] == True or picam2 is None:
                         #Stop and restart camera with new parameters
                         if picam2 is not None:
-                            try:
-                                picam2.stop()
-                                picam2.close()
-                            except Exception:
-                                pass
-                        picam2 = Picamera2(params['selected_camera_number'])
-                        
-                        # Determine the FPS the sensor can do at this resolution and lock the FPS to that
-                        max_hardware_fps = params['resolution']['max_fps']
-                        camera_fps = min(max_fps, max_hardware_fps)                        
-                        config = picam2.create_preview_configuration(
-                            main={  "format": 'YUV420', "size": params['resolution']['resolution'] },
-                            raw={"size": params['resolution']['sensor_raw']}
-                        )
-                        picam2.configure(config)
-                        picam2.set_controls({"FrameRate": camera_fps})
+                            CameraHandler.camera_reset_close(picam2)
+
+                        try:                        
+                            picam2 = Picamera2(params['selected_camera_number'])
+                            
+                            # Determine the FPS the sensor can do at this resolution and lock the FPS to that
+                            max_hardware_fps = params['selected_resolution']['max_fps']
+                            camera_fps = min(max_fps, max_hardware_fps)                        
+                            config = picam2.create_preview_configuration(
+                                main={  "format": 'YUV420', "size": params['selected_resolution']['resolution'] },
+                                raw={"size": params['selected_resolution']['sensor_raw']}
+                            )
+
+                            picam2.configure(config)
+                            picam2.set_controls({"FrameRate": camera_fps})
+                        except Exception as e:
+                            # On error - try resetting the camera resolution to the minimum
+                            # User may have selected too high a resolution
+                            CameraHandler.camera_reset_close(picam2)
+                            picam2 = None
+                            params['selected_resolution'] = params['available_resolutions'][0]
 
 
                     # Changing other options does not require a restart
@@ -174,64 +196,72 @@ class CameraHandler:
                     else:
                         rotate_fn = None
                     
-                    timestamp_params = CameraHandler.recalculate_timestamp_text_position( params['timestamp_scale_name'], params['resolution']['resolution'][0] ,params['resolution']['resolution'][1] , params['rotation'], params['timestamp_position'] )
+                    timestamp_params = CameraHandler.recalculate_timestamp_text_position( params['timestamp_scale_name'], params['selected_resolution']['resolution'][0] ,params['selected_resolution']['resolution'][1] , params['rotation'], params['timestamp_position'] )
                     parameter_change = False
                 
                 if not paused:
-                    # Start camera if previously stopped
-                    try:
-                        if picam2 is not None:
-                            if not picam2.started:
-                                picam2.start()
-                    except Exception as e:
-                        print(f"Exception on restarting camera {e}")
-
-                    if picam2 is not None and picam2.started:
+                    if picam2 is not None:
 
                         try:
-                            yuv_frame = picam2.capture_array()
-                        except TimeoutError:
-                            print("Camera timed out. Restarting pipeline...")
-                            picam2.cancel_all_and_flush()
-                            picam2.stop()
-                            picam2.start()
-                            time.sleep(0.5)
-                        
-                        # Convert full buffer (with padding) to BGR
-                        frame = cv2.cvtColor(yuv_frame, cv2.COLOR_YUV420p2BGR)
+                            if not picam2.started:
+                                picam2.start()
 
-                        # Crop the final BGR image to configured resolution
-                        config_height = params['resolution']['resolution'][1]
-                        config_width = params['resolution']['resolution'][0]
-                        frame = frame[:config_height, :config_width]
+                            # Capture crashes in picamera2
+                            # Set a 5 second timer which is cancelled if capture_array successfully generates an image
+                            # If the timer is triggered, it generates an exception which falls to the outer try/except
+                            # and resets the camera at the minimum resolution
+                            signal.setitimer(signal.ITIMER_REAL, 5.0)
+                            try:
+                                yuv_frame = picam2.capture_array()
+                            finally:
+                                signal.setitimer(signal.ITIMER_REAL, 0)                            
+          
+                            # Convert full buffer (with padding) to BGR
+                            frame = cv2.cvtColor(yuv_frame, cv2.COLOR_YUV420p2BGR)
 
-                        if rotate_fn is not None:
-                            frame = rotate_fn(frame)
-                            # Ensure contiguous memory for downstream operations
-                            frame = np.ascontiguousarray(frame)
-                        
-                        # Apply timestamp overlay
-                        if params['display_timestamp']:
-                            frame = CameraHandler.add_timestamp(frame, timestamp_params)
-                        
-                        success, encoded = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, params['jpeg_quality']])
-                        
-                        if not success:
-                            # Skip frame if encoding fails
-                            time.sleep(0.001)
-                            continue
-                        
-                        frame_bytes = encoded.tobytes()
-                        
-                        frame_size = len(frame_bytes)
-                        
-                        # Write JPEG bytes to shared memory
-                        if 0 < frame_size <= len(shm.buf):
-                            with lock:
-                                shm.buf[:frame_size] = frame_bytes
-                                frame_len.value = frame_size
-                                fid += 1
-                                frame_id.value = fid
+                            # The camera outputted image can be wider than the sensor area due to the inclusion of padding for memory alignment
+                            # This crops the image down to the actual user specified resolution
+                            config_height = params['selected_resolution']['resolution'][1]
+                            config_width = params['selected_resolution']['resolution'][0]
+                            frame = frame[:config_height, :config_width]
+
+                            # Perform image rotation if specified
+                            if rotate_fn is not None:
+                                frame = rotate_fn(frame)
+                                # Ensure contiguous memory for downstream operations
+                                frame = np.ascontiguousarray(frame)
+                            
+                            # Apply timestamp overlay if requested by user
+                            if params['display_timestamp']:
+                                frame = CameraHandler.add_timestamp(frame, timestamp_params)
+                            
+                            # Encode image in JPEG
+                            success, encoded = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, params['jpeg_quality']])
+                            
+                            if not success:
+                                # Skip frame if encoding fails
+                                time.sleep(0.001)
+                                continue
+                            
+                            frame_bytes = encoded.tobytes()
+                            
+                            frame_size = len(frame_bytes)
+                            
+                            # Write JPEG bytes to shared memory
+                            if 0 < frame_size <= len(shm.buf):
+                                with lock:
+                                    shm.buf[:frame_size] = frame_bytes
+                                    frame_len.value = frame_size
+                                    fid += 1
+                                    frame_id.value = fid
+
+                        except Exception as e:
+                            # On error - try resetting the camera resolution to the minimum resolution
+                            # The most likely reason to get here is the user set too high a resolution
+                            # for the pi to handle and it ran out of memory or otherwise crashed
+                            CameraHandler.camera_reset_close(picam2)
+                            picam2 = None
+                            params['selected_resolution'] = params['available_resolutions'][0]
                     
                     # Rate limiting to max FPS of the camera
                     elapsed = time.time() - start_time
@@ -241,7 +271,8 @@ class CameraHandler:
                     else:
                         time.sleep(0.001)
                 else:
-                    # Stop camera if previously started
+                    # We are paused
+                    # Stop camera if previously started but don't close it
                     try:
                         if picam2 is not None:
                             if picam2.started:
@@ -252,14 +283,9 @@ class CameraHandler:
                     time.sleep(0.1)
                     
         finally:
-            if picam2 is not None:
-                try:
-                    picam2.cancel_all_and_flush()
-                    picam2.stop()
-                    picam2.close()
-                except Exception:
-                    pass
+            CameraHandler.camera_reset_close(picam2)
             shm.close()
+
         
     def __set_new_rotation( self, rotation ):
         if rotation != None and isinstance(rotation, int) and rotation != self.image_rotation_degrees:
