@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 from datetime import datetime, timedelta
 from picamera2 import Picamera2
-from libcamera import controls
+from libcamera import controls, Transform
 from functools import wraps
 import threading
 import time
@@ -170,10 +170,17 @@ class CameraHandler:
                             
                             # Determine the FPS the sensor can do at this resolution and lock the FPS to that
                             max_hardware_fps = params['selected_resolution']['max_fps']
-                            camera_fps = min(max_fps, max_hardware_fps)                        
+                            camera_fps = min(max_fps, max_hardware_fps)
+                            # If the user has requested a 180 degree rotation, we can do that in hardware and save CPU
+                            # For other rotations it will have to be done in software which is more expensive
+                            if params['rotation'] == 180:
+                                transform=Transform(hflip=1, vflip=1)
+                            else:
+                                transform=Transform(hflip=0, vflip=0)
                             config = picam2.create_preview_configuration(
                                 main={  "format": 'YUV420', "size": params['selected_resolution']['resolution'] },
-                                raw={"size": params['selected_resolution']['sensor_raw']}
+                                raw={"size": params['selected_resolution']['sensor_raw']},
+                                transform=transform
                             )
                             controls_to_set = {"FrameRate": camera_fps}
                             # Set autofocus on if the camera supports it
@@ -189,19 +196,7 @@ class CameraHandler:
                             CameraHandler.camera_reset_close(picam2)
                             picam2 = None
                             params['selected_resolution'] = params['available_resolutions'][0]
-
-
-                    # Changing other options does not require a restart
-                    # Pre-compute rotation function for loop efficiency (NEON-accelerated via NumPy)
-                    if params['rotation'] == 90:
-                        rotate_fn = lambda f: np.rot90(f, k=3)  # 3x 90° CCW = 1x 90° CW
-                    elif params['rotation'] == 180:
-                        rotate_fn = lambda f: np.rot90(f, k=2)
-                    elif params['rotation'] == 270:
-                        rotate_fn = lambda f: np.rot90(f, k=1)
-                    else:
-                        rotate_fn = None
-                    
+        
                     timestamp_params = CameraHandler.recalculate_timestamp_text_position( params['timestamp_scale_name'], params['selected_resolution']['resolution'][0] ,params['selected_resolution']['resolution'][1] , params['rotation'], params['timestamp_position'] )
                     parameter_change = False
                 
@@ -231,12 +226,12 @@ class CameraHandler:
                             config_width = params['selected_resolution']['resolution'][0]
                             frame = frame[:config_height, :config_width]
 
-                            # Perform image rotation if specified
-                            if rotate_fn is not None:
-                                frame = rotate_fn(frame)
-                                # Ensure contiguous memory for downstream operations
-                                frame = np.ascontiguousarray(frame)
-                            
+                            # Perform software image rotation for 90 and 270 degrees as cannot do it in hardware
+                            if params['rotation'] == 90:
+                                frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+                            elif params['rotation'] == 270:
+                                frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)                           
+
                             # Apply timestamp overlay if requested by user
                             if params['display_timestamp']:
                                 frame = CameraHandler.add_timestamp(frame, timestamp_params)
@@ -292,12 +287,21 @@ class CameraHandler:
             CameraHandler.camera_reset_close(picam2)
             shm.close()
 
-        
     def __set_new_rotation( self, rotation ):
+        camera_restart_required = False
         if rotation != None and isinstance(rotation, int) and rotation != self.image_rotation_degrees:
             if (rotation <= 270) and ((rotation % 90) == 0):
                 with self.option_change_lock:
+                    # If the selected rotation is 180 degrees, this can be done in hardware
+                    # but requires a camera restart. The return of True is to signify this
+                    if rotation == 180 and (self.image_rotation_degrees != 180):
+                         camera_restart_required = True
+                    if rotation == 0 and (self.image_rotation_degrees != 0):
+                         camera_restart_required = True
                     self.image_rotation_degrees = rotation
+                    
+        # Software rotation which does not require a camera restart
+        return camera_restart_required
 
     @staticmethod
     def scale_name_to_scale_value( scale_name ):
@@ -369,7 +373,7 @@ class CameraHandler:
                 if isinstance( post_data[ 'selected_resolution' ], (list,tuple) ):
                     camera_restart_required = self.__change_resolution( post_data[ 'selected_resolution' ] )
             if 'image_rotation' in post_data:
-                self.__set_new_rotation( post_data[ 'image_rotation' ] )
+                camera_restart_required = self.__set_new_rotation( post_data[ 'image_rotation' ] )
             if 'timestamp_scale' in post_data:
                 self.__set_new_timestamp_scale( post_data[ 'timestamp_scale' ] )
             if 'timestamp_position' in post_data:
@@ -698,15 +702,16 @@ class CameraHandler:
         # in bytes/s. We will try and avoid exceeding this
         max_rate_bytes_s = self.config.get_parameter_value('max_wifi_bandwidth')*1024*1024  
         
-        print(max_rate_bytes_s)
-        
         # The minimum time between frames to avoid swamping the wifi
         min_interframe_delay = 1/30 
 
         try:
             last_posted_frame = -1
             last_frame_post_time = 0
-            
+            stats_start_time = time.time()
+            frames_sent = 0
+            bandwidth_bytes_consumed_session = 0
+    
             while self.is_user_viewing(username):
                 new_frame = False
                 
@@ -727,8 +732,6 @@ class CameraHandler:
                                 if total_sessions_open > 0:
                                     max_fps = (max_rate_bytes_s / total_sessions_open ) / length
                                     min_interframe_delay = 1/max_fps
-                                print( max_fps )
-                                print( length )
                         finally:
                             self.frame_gen_lock.release()
 
@@ -742,16 +745,23 @@ class CameraHandler:
                         b"\r\n" + frame + b"\r\n"
                     )
 
-                    yield payload                   
+                    yield payload
+                    frames_sent+=1
+                    bandwidth_bytes_consumed_session += len(frame)     
                     
                     now = time.time()
                     # Limit the frame rate to avoid swamping the wi-fi
                     remaining_frame_delay = 0.01
                     if (now - last_frame_post_time) < min_interframe_delay:
                         remaining_frame_delay = min_interframe_delay - (now - last_frame_post_time)
-                    
-                    print( f"remaining_frame_delay={remaining_frame_delay} original delay={(now - last_frame_post_time)} min_interframe={min_interframe_delay}" )
-                    
+                    if now - stats_start_time > 1.0:
+                        sent_fps = frames_sent / (now - stats_start_time)
+                        session_bandwidth_mbs = (bandwidth_bytes_consumed_session / (now - stats_start_time))/(1024**2)
+                        print(f"streamed FPS={sent_fps:.2f} session_bandwidth={session_bandwidth_mbs:.2f}MB/s")
+                        frames_sent = 0
+                        bandwidth_bytes_consumed_session = 0
+                        stats_start_time = now                        
+                                       
                     time.sleep(remaining_frame_delay)
                     last_frame_post_time = now
                 else:
