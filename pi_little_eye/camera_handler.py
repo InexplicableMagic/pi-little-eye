@@ -612,10 +612,10 @@ class CameraHandler:
             timestamp_text, cv2.FONT_HERSHEY_SIMPLEX, params['timestamp_text_scale'], params['timestamp_thickness_outer']
         )
         pad = params['timestamp_mask_pad']
-        x_min = max(x0 - pad, 0)
-        y_min = max(y0 - text_h - pad, 0)
-        x_max = min(x0 + text_w + pad, frame.shape[1])
-        y_max = min(y0 + baseline + pad, frame.shape[0])
+        
+        h, w = frame.shape[:2]
+        x_min, y_min = max(x0 - pad, 0), max(y0 - text_h - pad, 0)
+        x_max, y_max = min(x0 + text_w + pad, w), min(y0 + baseline + pad, h)
 
         roi = frame[y_min:y_max, x_min:x_max]
         local_org = (x0 - x_min, y0 - y_min)
@@ -626,13 +626,19 @@ class CameraHandler:
 
         outline_mask = cv2.dilate(mask, params['timestamp_outline_kernel'])
 
-        outline_alpha = (outline_mask.astype(np.float32) / 255.0)[..., None]
-        roi[:] = (roi * (1 - outline_alpha)).astype(np.uint8)
+        is_color = len(frame.shape) == 3
+        if is_color:
+            inv_outline = cv2.cvtColor(cv2.bitwise_not(outline_mask), cv2.COLOR_GRAY2BGR)
+            mask_c = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+        else:
+            inv_outline = cv2.bitwise_not(outline_mask)
+            mask_c = mask
 
-        fill_alpha = (mask.astype(np.float32) / 255.0)[..., None]
-        roi[:] = (roi * (1 - fill_alpha) + 255 * fill_alpha).astype(np.uint8)
+        roi_blackened = cv2.multiply(roi, inv_outline, scale=1.0/255.0)
+        
+        roi_final = cv2.add(roi_blackened, mask_c)
 
-        frame[y_min:y_max, x_min:x_max] = roi
+        frame[y_min:y_max, x_min:x_max] = roi_final
         return frame
 
 
