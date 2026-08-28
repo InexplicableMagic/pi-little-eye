@@ -342,7 +342,7 @@ class CameraHandler:
                     #Validates the resolution passed in is a mode available on this camera
                     if self.camera_detected:
                         new_resolution = CameraHandler.__suggest_camera_resolution( self.available_resolutions, new_resolution )
-                        if new_resolution['resolution'][0] != self.current_resolution['resolution'][0] or new_resolution['resolution'][1] != self.current_resolution['resolution'][1]:                            
+                        if new_resolution['resolution'][0] != self.current_resolution['resolution'][0] or new_resolution['resolution'][1] != self.current_resolution['resolution'][1]:
                             # Update the config with the selected resolution
                             with self.option_change_lock:
                                 self.current_resolution = new_resolution
@@ -371,9 +371,11 @@ class CameraHandler:
         if post_data is not None and isinstance( post_data, dict):
             if 'selected_resolution' in post_data:
                 if isinstance( post_data[ 'selected_resolution' ], (list,tuple) ):
-                    camera_restart_required = self.__change_resolution( post_data[ 'selected_resolution' ] )
+                    if self.__change_resolution( post_data[ 'selected_resolution' ] ):
+                        camera_restart_required = True
             if 'image_rotation' in post_data:
-                camera_restart_required = self.__set_new_rotation( post_data[ 'image_rotation' ] )
+                if self.__set_new_rotation( post_data[ 'image_rotation' ] ):
+                    camera_restart_required = True
             if 'timestamp_scale' in post_data:
                 self.__set_new_timestamp_scale( post_data[ 'timestamp_scale' ] )
             if 'timestamp_position' in post_data:
