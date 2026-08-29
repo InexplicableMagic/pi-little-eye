@@ -163,7 +163,7 @@ def video_mjpeg():
 
                 # If authentication was successful, return the video feed
                 log_entry( 'info', 'video_viewed', f"Camera viewed", username=username )
-                response = Response(ch.generate_camera_video(username, 0), content_type='multipart/x-mixed-replace; boundary=frame', direct_passthrough=True)
+                response = Response(ch.stream_camera_video(username, 0), content_type='multipart/x-mixed-replace; boundary=frame', direct_passthrough=True)
                 response.headers['Connection'] = 'close'
                 response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, pre-check=0, post-check=0, max-age=0'
                 response.headers['Pragma'] = 'no-cache'

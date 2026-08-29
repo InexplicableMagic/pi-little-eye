@@ -731,28 +731,38 @@ class CameraHandler:
         ret, buffer = cv2.imencode('.png', img)
         return buffer.tobytes()
     
-    
+    # Log that a user is viewing the camera and start it (if not already started)
     def add_viewing_start_camera( self, username, camera_num ):
         username = username.lower()
         with self.update_login_lock:
             if username in self.logged_in_users:
-                self.logged_in_users[username]+=1
+                self.logged_in_users[username][camera_num] += 1
             else:
-                self.logged_in_users[username] = 1
+                self.logged_in_users[username] = [0] * len( self.camera_list )
+                self.logged_in_users[username][camera_num] = 1
+
             self.pause_camera( False, camera_num )
-           
+      
+    # Register a user as logged out from one specific camera
+    # Stop the camera if there are no viewers of that specific camera     
     def remove_viewing_user_stop_camera( self, username, camera_num ):
         username = username.lower()
         with self.update_login_lock:
             if username in self.logged_in_users:
-                self.logged_in_users[username] -= 1
-                if self.logged_in_users[username] < 1:
-                    del self.logged_in_users[username]
-                    self.config.write_log_line('info', False, username, '', 'disconnect', "Stopped viewing camera.")
+                self.logged_in_users[username][camera_num]  -= 1
+                if self.logged_in_users[username][camera_num] < 1:
+                    total_logins_all_cameras = sum(self.logged_in_users[username])
+                    if total_logins_all_cameras > 0:                
+                        self.config.write_log_line('info', False, username, '', 'disconnect', f"User stopped viewing (camera {camera_num}).")
+                    else:
+                        self.config.write_log_line('info', False, username, '', 'disconnect', f"User stopped viewing (all)")
+                        del self.logged_in_users[username]
                 else:
-                    self.config.write_log_line('info', False, username, '', 'disconnect', "Session disconnected.")
-            # If there are no other users connected - pause the camera
-            if sum(self.logged_in_users.values()) < 1:
+                    self.config.write_log_line('info', False, username, '', 'disconnect', f"Disconnected one session (camera {camera_num}).")
+
+            # If there are no other users connected to this camera - pause the camera
+            total_users_this_camera_only = sum(val[camera_num] for val in self.logged_in_users.values())
+            if total_users_this_camera_only < 1:
                 self.pause_camera( True, camera_num )
 
     def is_user_viewing( self, username ):
@@ -772,12 +782,12 @@ class CameraHandler:
                 if username in self.logged_in_users:
                     del self.logged_in_users[username]
                
-    def get_total_num_viewing_sessions( self ):
+    def get_total_num_viewing_sessions_all_cameras( self ):
         with self.update_login_lock:
-            return sum(self.logged_in_users.values())
+            return sum(map(sum, self.logged_in_users.values()))
     
        
-    def generate_camera_video(self, username, camera_num):            
+    def stream_camera_video(self, username, camera_num):            
         username = username.lower()
 
         if camera_num < 0 or camera_num >= len(self.camera_list):
@@ -806,6 +816,7 @@ class CameraHandler:
             frames_sent = 0
             bandwidth_bytes_consumed_session = 0
     
+            # This can change if an admin forcibly logs a user out
             while self.is_user_viewing(username):
                 new_frame = False
                 
@@ -822,7 +833,7 @@ class CameraHandler:
                                 frame = bytes(raw_bytes)
                                 last_posted_frame = frame_id.value  # Only update on valid read
                                 new_frame = True
-                                total_sessions_open = self.get_total_num_viewing_sessions()
+                                total_sessions_open = self.get_total_num_viewing_sessions_all_cameras( )
                                 if total_sessions_open > 0:
                                     max_fps = (max_rate_bytes_s / total_sessions_open ) / length
                                     min_interframe_delay = 1/max_fps
@@ -857,7 +868,7 @@ class CameraHandler:
                         stats_start_time = now                        
                                        
                     time.sleep(remaining_frame_delay)
-                    last_frame_post_time = now
+                    last_frame_post_time = time.time()
                 else:
                     time.sleep(0.01)
                    
@@ -868,3 +879,4 @@ class CameraHandler:
             return
         finally:
             self.remove_viewing_user_stop_camera( username, camera_num )
+
