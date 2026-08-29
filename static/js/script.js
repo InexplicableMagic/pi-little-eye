@@ -296,9 +296,6 @@ function resetConfigOnUI(){
             
             ipBlocklistTextArea.value = ipStringBlocklist;
             
-            const rotationSelect = document.getElementById('camera-rotation-select');
-            rotationSelect.value = config.image_rotation;
-            
             const timestampPositionSelect = document.getElementById('timestamp-position-select');
             timestampPositionSelect.value = config.timestamp_position;
             
@@ -313,7 +310,13 @@ function resetConfigOnUI(){
             
             generateUserListTable( config.usernames, config.current_username, 'user-list-table' );
             generateAppKeyTable( config.app_keys, 'app-key-list-table' );
-            populateSelectWithResolutions( 'camera-resolutions-select', config.available_camera_resolutions, config.current_camera_resolution );
+            
+            //TODO: Update for multiple camera support
+            const cam_num = 0
+            populateSelectWithResolutions( 'camera-resolutions-select', config.cameras[cam_num].available_resolutions, config.cameras[cam_num].current_resolution );
+            const rotationSelect = document.getElementById('camera-rotation-select');
+            rotationSelect.value = config.cameras[cam_num].image_rotation;
+
         }else{
             console.log("No config allowed");
         }
@@ -411,12 +414,18 @@ function convertConfigUIStateToJSON(){
                },
                enforce_ip_whitelist: enforce_whitelisted_ips,
                enforce_ip_blocklist: enforce_blocklist_ips,
-               selected_resolution: getSelectedResolution( 'camera-resolutions-select' ),
-               image_rotation: Number(rotationSelect.value),
                timestamp_scale: timeStampScaleSelect.value,
                timestamp_position: timestampPositionSelect.value,
                display_timestamp: displayTimestampCheckbox.checked,
-               max_wifi_bandwidth: Number(maxWifiBandwidthEntry.value)
+               max_wifi_bandwidth: Number(maxWifiBandwidthEntry.value),
+               //TODO: Update for multiple cameras - fixed to one at the moment
+               cameras: [
+                   {
+                       camera_number: 0,
+                       selected_resolution: getSelectedResolution( 'camera-resolutions-select' ),
+                       image_rotation: Number(rotationSelect.value),
+                   }
+               ]
         };
         return postObject;
         
@@ -732,7 +741,7 @@ function generateAppKeyTable(data, appKeyDiv) {
 }
 
 
-function populateSelectWithResolutions(selectName, resolutions, currentResolution) {
+function populateSelectWithResolutions(selectName, allResolutions, currentResolution) {
     // Access the select element by its ID
     const selectElement = document.getElementById(selectName);
 
@@ -740,15 +749,15 @@ function populateSelectWithResolutions(selectName, resolutions, currentResolutio
     selectElement.innerHTML = '';
 
     // Iterate over the list of resolutions
-    resolutions.forEach(resolution => {
+    allResolutions.forEach(resolution => {
         // Create an option element
         const optionElement = document.createElement('option');
 
         // Set the text and value of the option element
-        optionElement.textContent = `${resolution[0]} x ${resolution[1]}`;
-        optionElement.value = `${resolution[0]}x${resolution[1]}`;
+        optionElement.textContent = `${resolution.resolution[0]} x ${resolution.resolution[1]}`;
+        optionElement.value = `${resolution.resolution[0]}x${resolution.resolution[1]}`;
         
-        if (currentResolution && currentResolution[0] === resolution[0] && currentResolution[1] === resolution[1]) {
+        if (currentResolution && currentResolution.resolution[0] === resolution.resolution[0] && currentResolution.resolution[1] === resolution.resolution[1]) {
             optionElement.selected = true;
         }
 
@@ -768,7 +777,7 @@ function getSelectedResolution(selectName) {
     
     const [width, height] = selectedOption.value.split('x').map(Number);
     
-    return [width, height];
+    return { resolution: [width, height] };
 }
 
 function convertLogDataToHTMLTable( log_data ){

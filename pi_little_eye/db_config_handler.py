@@ -163,12 +163,13 @@ class DBConfigHandler:
             #Some Raspberry Pis can have more than one camera - this stores which camera we are looking at
             self.insert_or_update_parameter( 'cam_number', 'int', 0 )
             # The currently user selected resolution for the camera
-            self.insert_or_update_parameter( 'cam_res_width', 'int', 640 )
-            self.insert_or_update_parameter( 'cam_res_height', 'int', 480 )
+            # 0 prefix mean camera 0 if there is more than one
+            self.insert_or_update_parameter( '0:cam_res_width', 'int', 640 )
+            self.insert_or_update_parameter( '0:cam_res_height', 'int', 480 )
             # Delete log lines after this number of days
             self.insert_or_update_parameter( 'delete_log_after_days', 'int', 90 )
             # Default image rotation in degrees: 0, 90, 180 or 270
-            self.insert_or_update_parameter( 'image_rotation', 'int', 0 )
+            self.insert_or_update_parameter( '0:image_rotation', 'int', 0 )
             # Default timestamp text scale multiplier, sets the size of the timestamp text
             self.insert_or_update_parameter( 'timestamp_scale_factor', 'string' , 'medium')
             # Default timestamp text position
@@ -1182,7 +1183,6 @@ class DBConfigHandler:
                         'enforce_ip_blocklist': self.get_parameter_value('enforce_ip_blocklist'),
                         'usernames' : self.list_all_usernames(),
                         'app_keys' : self.list_all_app_keys(),
-                        'image_rotation': self.get_parameter_value('image_rotation'),
                         'timestamp_scale': self.get_parameter_value('timestamp_scale_factor'),
                         'display_timestamp': self.get_parameter_value('display_timestamp'),
                         'timestamp_position': self.get_parameter_value('timestamp_position'),
@@ -1195,7 +1195,7 @@ class DBConfigHandler:
     def validate_config_object( config_object ):
         if config_object:
             keys = [ 'allowed_ips', 'enforce_ip_whitelist', 'enforce_ip_blocklist', 
-                     'image_rotation', 'timestamp_position', 'display_timestamp', 'max_wifi_bandwidth' ]
+                     'timestamp_position', 'display_timestamp', 'max_wifi_bandwidth', 'cameras' ]
             for key in keys:
                 if key not in config_object:
                     return False
@@ -1210,10 +1210,6 @@ class DBConfigHandler:
             if not isinstance(config_object['enforce_ip_whitelist'], bool):
                 return False
             if not isinstance(config_object['enforce_ip_blocklist'], bool):
-                return False
-            if not isinstance( config_object['image_rotation'], int ):
-                return False
-            if config_object['image_rotation'] > 270 or config_object['image_rotation'] < 0 or (config_object['image_rotation'] % 90) != 0:
                 return False
             if not isinstance( config_object['timestamp_position'], str ):
                 return False
@@ -1238,6 +1234,26 @@ class DBConfigHandler:
                 if not DBConfigHandler.is_valid_ipv4_or_ipv6_wildcard_range( ip ):
                     return False
 
+            if not isinstance( config_object['cameras'], (tuple, list) ):
+                return False
+            for camera in config_object['cameras']:
+                if not 'image_rotation' in camera:
+                    return False
+                if not isinstance( camera['image_rotation'], int ):
+                    return False
+                if camera['image_rotation'] > 270 or camera['image_rotation'] < 0 or (camera['image_rotation'] % 90) != 0:
+                    return False
+                if not 'selected_resolution' in camera:
+                    return False
+                if not isinstance( camera['selected_resolution'], dict ):
+                    return False
+                if not 'resolution' in camera['selected_resolution']:
+                    return False
+                if not isinstance( camera['selected_resolution']['resolution'], (list,tuple) ):
+                    return False
+                if len( camera['selected_resolution']['resolution'] ) != 2:
+                    return False                
+
             return True
         
         return False
@@ -1247,17 +1263,12 @@ class DBConfigHandler:
             with self.config_change_lock:
                 if 'allowed_ips' in config_object:
                     self.set_ip_allow_list( config_object['allowed_ips']['whitelisted'], config_object['allowed_ips']['blacklisted'] )
-
                 if 'enforce_ip_whitelist' in config_object:
                     self.insert_or_update_parameter( 'enforce_ip_whitelist', 'bool', config_object['enforce_ip_whitelist'] )
                     self.enforce_ip_whitelist = config_object['enforce_ip_whitelist']
-                
                 if 'enforce_ip_blocklist' in config_object:
                     self.insert_or_update_parameter( 'enforce_ip_blocklist', 'bool', config_object['enforce_ip_blocklist'] )
                     self.enforce_ip_blocklist = config_object['enforce_ip_blocklist']
-                
-                if 'image_rotation' in config_object:
-                    self.insert_or_update_parameter( 'image_rotation', 'int', config_object['image_rotation'] )
                 if 'display_timestamp' in config_object:
                     self.insert_or_update_parameter( 'display_timestamp', 'bool', config_object['display_timestamp'] )
                 if 'timestamp_position' in config_object:
