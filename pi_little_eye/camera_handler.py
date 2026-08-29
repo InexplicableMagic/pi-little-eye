@@ -13,6 +13,7 @@ import gc
 import logging
 import io
 import signal
+import queue
 from multiprocessing import get_context, shared_memory, Pipe
 
 from PIL import Image, ImageDraw
@@ -29,9 +30,11 @@ class CameraHandler:
         self.timestamp_scale_name = self.config.get_parameter_value( 'timestamp_scale_factor' )
         self.timestamp_position = config.get_parameter_value( 'timestamp_position' )
         self.display_timestamp = config.get_parameter_value( 'display_timestamp' )
-        self.camera_state_change_lock = threading.Lock()
-        self.option_change_lock = threading.Lock()
-        self.update_login_lock = threading.Lock()
+        self.camera_state_change_lock = threading.Lock()  # Lock pause/resume state on camera
+        self.option_change_lock = threading.Lock()  # Lock changes to user config options in this object
+        self.update_login_lock = threading.Lock()   # Lock updates to list of logged in users
+        self.stream_update_lock = threading.Lock()  # Lock for changing stream_queues
+        self.stream_queues = [] # List of queues for sending config updates to running streams
         self.last_frame = None
         self.logged_in_users = dict()
         # Turn off the verbose camera logging
@@ -129,6 +132,7 @@ class CameraHandler:
                 
     # Close down and tidy up background process that generates camera frames
     def close_down( self ):
+        # Tell all streams relying on the cameras to stop
         for cam in range(0, len(self.camera_list)):
             with self.camera_state_change_lock:
                 msg = { 'stop': True }
@@ -426,6 +430,7 @@ class CameraHandler:
         return resolutions[0]
     
     # Takes a posted config change from the UI and converts it into settings changes
+    # Must already be validated
     def set_config( self, post_data ):
         if post_data is not None and isinstance( post_data, dict):
             # Common parameters
@@ -435,6 +440,8 @@ class CameraHandler:
                 self.__set_new_timestamp_position( post_data[ 'timestamp_position' ] )
             if 'display_timestamp' in post_data:
                 self.__set_display_timestamp( post_data[ 'display_timestamp' ] )
+            if 'max_wifi_bandwidth' in post_data:
+                self.publish_stream_config_update( { 'max_wifi_bandwidth': post_data['max_wifi_bandwidth'] } )
             
             # Per camera settings
             if 'cameras' in post_data:
@@ -785,7 +792,22 @@ class CameraHandler:
     def get_total_num_viewing_sessions_all_cameras( self ):
         with self.update_login_lock:
             return sum(map(sum, self.logged_in_users.values()))
-    
+
+    def subscribe_stream_config_updates( self ):
+        my_queue = queue.Queue()
+        with self.stream_update_lock:
+            self.stream_queues.append( my_queue ) 
+        return my_queue
+
+    def unsubscribe_stream_config_updates( self, my_queue ):
+        with self.stream_update_lock:
+            self.stream_queues.remove( my_queue )
+
+    def publish_stream_config_update( self, message ):
+        with self.stream_update_lock:
+            subs = list( self.stream_queues )
+        for q in subs:
+            q.put( message )
        
     def stream_camera_video(self, username, camera_num):            
         username = username.lower()
@@ -797,6 +819,8 @@ class CameraHandler:
         frame_len = self.camera_list[camera_num]['frame_len']
         frame_gen_lock = self.camera_list[camera_num]['frame_gen_lock']
         bg_shared_mem = self.camera_list[camera_num]['bg_shared_mem']
+
+        config_updates_q = self.subscribe_stream_config_updates( )
                 
         yield (b'--frame\r\n'
                    b'Content-Type: image/png\r\n\r\n' + CameraHandler.create_message_image("Camera starting...") + b'\r\n')
@@ -815,10 +839,17 @@ class CameraHandler:
             stats_start_time = time.time()
             frames_sent = 0
             bandwidth_bytes_consumed_session = 0
+            running = True
     
             # This can change if an admin forcibly logs a user out
-            while self.is_user_viewing(username):
+            while self.is_user_viewing(username) and running:
                 new_frame = False
+                try:
+                    msg = config_updates_q.get(block=False)
+                    if 'max_wifi_bandwidth' in msg:
+                        max_rate_bytes_s = msg['max_wifi_bandwidth'] * 1024 * 1024
+                except queue.Empty:
+                    pass
                 
                 # Check if a new frame ID exists
                 if frame_id.value > 0 and last_posted_frame < frame_id.value:
@@ -833,6 +864,7 @@ class CameraHandler:
                                 frame = bytes(raw_bytes)
                                 last_posted_frame = frame_id.value  # Only update on valid read
                                 new_frame = True
+                                # Convert max allowed bandwidth into a framerate split between all viewing users
                                 total_sessions_open = self.get_total_num_viewing_sessions_all_cameras( )
                                 if total_sessions_open > 0:
                                     max_fps = (max_rate_bytes_s / total_sessions_open ) / length
@@ -878,5 +910,6 @@ class CameraHandler:
             print("Generator yield exit")
             return
         finally:
+            self.unsubscribe_stream_config_updates( config_updates_q )
             self.remove_viewing_user_stop_camera( username, camera_num )
 
