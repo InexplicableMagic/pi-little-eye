@@ -123,6 +123,30 @@ class CameraHandler:
     def raise_timeout(signum, frame):
         raise TimeoutError("capture_array() timed out")
     
+    # Determines if the camera needs to be restarted in order to
+    # effect the paramater change
+    @staticmethod
+    def camera_restart_needed( existing_params, new_params ):
+        # If the camera was never initialised, a restart is required
+        if existing_params is None:
+            return True
+
+        # If the rotation changed to or from a rotation handled in hardware
+        # this requires a restart
+        if new_params['rotation'] != existing_params['rotation']:
+            if new_params['rotation'] == 180 or new_params['rotation'] == 0:
+                return True
+            if existing_params['rotation'] == 180 or existing_params['rotation'] == 0:
+                return True
+
+        # If the resolution changed a restart is required
+        if new_params['selected_resolution']['resolution'][0] != existing_params['selected_resolution']['resolution'][0]:
+            return True
+        if new_params['selected_resolution']['resolution'][1] != existing_params['selected_resolution']['resolution'][1]:
+            return True
+
+        return False
+    
     # Starts in the paused state and then needs waking up to generate images
     @staticmethod
     def bg_image_producer(shm_name: str, lock, frame_len, frame_id, control_pipe, params):
@@ -134,12 +158,12 @@ class CameraHandler:
         camera_fps = max_fps
         fid = 0
         parameter_change = True
-        rotate_fn = None
+        camera_restart_required = True
         picam2 = None
         paused = True
 
         signal.signal(signal.SIGALRM, CameraHandler.raise_timeout)
-               
+        
         try:
             while running:
                 start_time = time.time()
@@ -153,14 +177,18 @@ class CameraHandler:
                             if msg['stop']:
                                 running = False
                         else:
+                            camera_restart_required = CameraHandler.camera_restart_needed( params, msg )
                             params = msg
                             parameter_change = True
                     
                 if parameter_change or picam2 is None:
                     # Assumed parameters are validated by this point
+
+                    timestamp_params = CameraHandler.recalculate_timestamp_text_position( params['timestamp_scale_name'], params['selected_resolution']['resolution'][0] ,params['selected_resolution']['resolution'][1] , params['rotation'], params['timestamp_position'] )
+                    parameter_change = False
                     
                     #Changing resolution requires a camera restart
-                    if params['camera_restart'] == True or picam2 is None:
+                    if camera_restart_required == True or picam2 is None:
                         #Stop and restart camera with new parameters
                         if picam2 is not None:
                             CameraHandler.camera_reset_close(picam2)
@@ -190,15 +218,14 @@ class CameraHandler:
 
                             picam2.configure(config)
                             picam2.set_controls(controls_to_set)
+                            camera_restart_required = False
                         except Exception as e:
                             # On error - try resetting the camera resolution to the minimum
                             # User may have selected too high a resolution
                             CameraHandler.camera_reset_close(picam2)
                             picam2 = None
                             params['selected_resolution'] = params['available_resolutions'][0]
-        
-                    timestamp_params = CameraHandler.recalculate_timestamp_text_position( params['timestamp_scale_name'], params['selected_resolution']['resolution'][0] ,params['selected_resolution']['resolution'][1] , params['rotation'], params['timestamp_position'] )
-                    parameter_change = False
+
                 
                 if not paused:
                     if picam2 is not None:
@@ -328,8 +355,8 @@ class CameraHandler:
         with self.option_change_lock:
             self.display_timestamp = do_display
 
-    def post_camera_options_change( self, camera_restart=False ):
-        msg = self.generate_camera_parameter_message(camera_restart)
+    def post_camera_options_change( self ):
+        msg = self.generate_camera_parameter_message()
         self.camera_control_pipe.send( msg )
 
     # Change the camera resolution - can be set whilst the camera is running
@@ -367,23 +394,19 @@ class CameraHandler:
     
     # Takes a posted config change from the UI and converts it into settings changes
     def set_config( self, post_data ):
-        camera_restart_required = False
         if post_data is not None and isinstance( post_data, dict):
             if 'selected_resolution' in post_data:
-                if isinstance( post_data[ 'selected_resolution' ], (list,tuple) ):
-                    if self.__change_resolution( post_data[ 'selected_resolution' ] ):
-                        camera_restart_required = True
+                self.__change_resolution( post_data[ 'selected_resolution' ] )
             if 'image_rotation' in post_data:
-                if self.__set_new_rotation( post_data[ 'image_rotation' ] ):
-                    camera_restart_required = True
+                self.__set_new_rotation( post_data[ 'image_rotation' ] )
             if 'timestamp_scale' in post_data:
                 self.__set_new_timestamp_scale( post_data[ 'timestamp_scale' ] )
             if 'timestamp_position' in post_data:
                 self.__set_new_timestamp_position( post_data[ 'timestamp_position' ] )
             if 'display_timestamp' in post_data:
-                self.__set_display_timestamp(  post_data[ 'display_timestamp' ] )
+                self.__set_display_timestamp( post_data[ 'display_timestamp' ] )
             
-            self.post_camera_options_change(camera_restart=camera_restart_required)
+            self.post_camera_options_change()
             
     
     # Get the resolutions the camera can do  
