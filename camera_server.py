@@ -700,7 +700,7 @@ def on_exit(server):
     if cert_validity_thread and cert_validity_thread.is_alive():
         cert_validity_thread.join(timeout=5)
 
-# Called by the gunicorn worker (the forked one) on exit, not the master process
+# Called by the gunicorn worker (the forked one) on exit, not the main process
 def worker_exit(server, worker):
     global ch
     if ch:
@@ -712,6 +712,7 @@ def post_fork(server, worker):
     ch = CameraHandler( dbch, worker )
 
 # Periodically check if we need a new self-signed certificate creating
+# Running on the main process - not the forked one
 def check_cert_validity():
     while not stop_event.wait(timeout=86400):
         if not using_own_certificate:
@@ -767,7 +768,7 @@ if __name__ == '__main__':
     # Boot via gunicorn internally instead of gevent WSGIServer
     options = {
         'bind': f"{args.host}:{args.port}",
-        'workers': 1,
+        'workers': 1,   # Code relies on only one worker process, don't increase
         'threads': 10,
         'worker_class': 'gthread',
         'certfile': certfile,

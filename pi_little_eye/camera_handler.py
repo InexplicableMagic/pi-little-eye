@@ -48,65 +48,74 @@ class CameraHandler:
 
         if len( self.all_cam_props ) > 0:
             self.camera_detected = True          
-
+    
         # Start a separate background process for each camera
         for camera_num in range(0,  len(self.all_cam_props) ):
             resolutions = self.all_cam_props[camera_num]['resolutions']
-            self.resolutions_wh = []
             # Resolutions as a simple list of widths and heights
             if resolutions != None and len(resolutions) > 0:
-                camera_details = {  }
-
-                user_res_width = self.config.get_parameter_value( f"{camera_num}:cam_res_width" )
-                user_res_height = self.config.get_parameter_value( f"{camera_num}:cam_res_height" )
-                image_rotation_degrees = self.config.get_parameter_value( f"{camera_num}:image_rotation" )
-                if user_res_width is None or user_res_height is None or image_rotation_degrees is None:
-                    # Camera has not previously been initialised in config - set defaults
-                    user_res_width = 640
-                    user_res_height = 480
-                    image_rotation_degrees = 0
-
-                camera_details['paused'] = True
-                camera_details['resolutions_wh'] = CameraHandler.resolutions_to_width_height_list( resolutions )
-                camera_details['available_resolutions'] = resolutions
-                camera_details['current_resolution'] = CameraHandler.__suggest_camera_resolution( resolutions, ( user_res_width, user_res_height ) )
-                
-                self.config.insert_or_update_parameter( f"{camera_num}:cam_res_width", 'int', camera_details['current_resolution']['resolution'][0] )
-                self.config.insert_or_update_parameter( f"{camera_num}:cam_res_height", 'int', camera_details['current_resolution']['resolution'][1] )
-
-                camera_details['current_rotation'] = image_rotation_degrees
-                self.config.insert_or_update_parameter( f"{camera_num}:image_rotation", 'int', camera_details['current_rotation'] )
-                           
-                ctx = get_context("spawn")  # explicit spawn: fresh interpreter, no inherited state
-
-                camera_details['bg_shared_mem'] = shared_memory.SharedMemory(create=True, size=4*1024*1024)
-                camera_details['frame_len'] = ctx.Value("i", 0)   # Length in bytes of the current frame
-                camera_details['frame_id'] = ctx.Value("i", -1)    # Incremented every time a new frame is published
-                camera_details['frame_gen_lock'] = ctx.Lock()
-                camera_details['camera_control_pipe'], child_cam_control_pipe = ctx.Pipe()  # For sending configuration changes to the camera processs
-                child_msg_pipe, camera_details['message_pipe'] = ctx.Pipe()  # For sending configuration changes to the camera processs
-                                
-                camera_initial_params = self.generate_camera_parameter_message(camera_num, camera_details=camera_details)
-                camera_details['camera_process'] = ctx.Process(
-                    target=CameraHandler.bg_image_producer,
-                    args=(  camera_num,
-                            child_msg_pipe,
-                            camera_details['bg_shared_mem'].name, 
-                            camera_details['frame_gen_lock'], 
-                            camera_details['frame_len'], 
-                            camera_details['frame_id'], 
-                            child_cam_control_pipe,
-                            camera_initial_params ),
-                    daemon=False
-                )
-                
-                camera_details['camera_process'].start()
+                camera_details = self.start_camera( camera_num )
                 self.camera_list.append( camera_details )
  
         # Thread watches that the background process is running
+        self.background_watcher_running = True
         self.bg_process_watcher_thread = threading.Thread(target=self.bg_process_watcher, daemon=True)
         self.bg_process_watcher_thread.start()
-        
+
+
+    def start_camera( self, camera_num ):
+        with self.camera_state_change_lock:
+            camera_details = {  }
+            resolutions = self.all_cam_props[camera_num]['resolutions']
+
+            user_res_width = self.config.get_parameter_value( f"{camera_num}:cam_res_width" )
+            user_res_height = self.config.get_parameter_value( f"{camera_num}:cam_res_height" )
+            image_rotation_degrees = self.config.get_parameter_value( f"{camera_num}:image_rotation" )
+            if user_res_width is None or user_res_height is None or image_rotation_degrees is None:
+                # Camera has not previously been initialised in config - set defaults
+                user_res_width = 640
+                user_res_height = 480
+                image_rotation_degrees = 0
+
+            camera_details['paused'] = True
+            camera_details['resolutions_wh'] = CameraHandler.resolutions_to_width_height_list( resolutions )
+            camera_details['available_resolutions'] = resolutions
+            camera_details['current_resolution'] = CameraHandler.__suggest_camera_resolution( resolutions, ( user_res_width, user_res_height ) )
+            
+            self.config.insert_or_update_parameter( f"{camera_num}:cam_res_width", 'int', camera_details['current_resolution']['resolution'][0] )
+            self.config.insert_or_update_parameter( f"{camera_num}:cam_res_height", 'int', camera_details['current_resolution']['resolution'][1] )
+
+            camera_details['current_rotation'] = image_rotation_degrees
+            self.config.insert_or_update_parameter( f"{camera_num}:image_rotation", 'int', camera_details['current_rotation'] )
+                       
+            ctx = get_context("spawn")  # explicit spawn: fresh interpreter, no inherited state
+
+            camera_details['bg_shared_mem'] = shared_memory.SharedMemory(create=True, size=4*1024*1024)
+            camera_details['frame_len'] = ctx.Value("i", 0)   # Length in bytes of the current frame
+            camera_details['frame_id'] = ctx.Value("i", -1)    # Incremented every time a new frame is published
+            camera_details['frame_gen_lock'] = ctx.Lock()
+            camera_details['camera_control_pipe'], child_cam_control_pipe = ctx.Pipe()  # For sending configuration changes to the camera processs
+            child_msg_pipe, camera_details['message_pipe'] = ctx.Pipe()  # For sending configuration changes to the camera processs
+                            
+            camera_initial_params = self.generate_camera_parameter_message(camera_num, camera_details=camera_details)
+            camera_details['camera_process'] = ctx.Process(
+                target=CameraHandler.bg_image_producer,
+                args=(  camera_num,
+                        child_msg_pipe,
+                        camera_details['bg_shared_mem'].name, 
+                        camera_details['frame_gen_lock'], 
+                        camera_details['frame_len'], 
+                        camera_details['frame_id'], 
+                        child_cam_control_pipe,
+                        camera_initial_params ),
+                daemon=False
+            )
+            
+            camera_details['camera_process'].start()
+            camera_details['available'] = True
+
+            return camera_details
+
         
     def generate_camera_parameter_message( self, camera_number, camera_details = None ):
         if camera_details is None:
@@ -127,12 +136,14 @@ class CameraHandler:
             return cam_param_block
 
     def send_camera_message( self, camera_num, message ):
-        if camera_num >= 0 and camera_num < len( self.camera_list ):      
-            try:
-                self.camera_list[camera_num]['camera_control_pipe'].send( message )
-                return True
-            except Exception:
-                pass
+        if camera_num >= 0 and camera_num < len( self.camera_list ):
+            if self.camera_list[camera_num]['available']:
+                if self.camera_list[camera_num]['camera_process'].is_alive():    
+                    try:
+                        self.camera_list[camera_num]['camera_control_pipe'].send( message )
+                        return True
+                    except Exception:
+                        pass
         return False     
 
         
@@ -143,28 +154,48 @@ class CameraHandler:
                     self.camera_list[camera_num]['paused'] = new_state
                     msg = { 'paused': new_state }
                     self.send_camera_message( camera_num, msg )
-                
-    # Close down and tidy up background process that generates camera frames
+   
+
+    def close_down_camera_process( self, cam ):
+        with self.camera_state_change_lock:
+            self.camera_list[cam]['available'] = False
+            self.send_camera_message( cam, { 'stop': True } )
+
+        self.camera_list[cam]['camera_process'].join( timeout=5 )
+
+        if self.camera_list[cam]['camera_process'].is_alive():
+            self.camera_list[cam]['camera_process'].terminate()
+            self.camera_list[cam]['camera_process'].join( timeout=1 )  # Reclaim PID from process table
+            
+        # Close down shared memory used to transmit frames from the camera
+        # Memory leak if not closed down
+        try:
+            self.camera_list[cam]['bg_shared_mem'].close()
+        except Exception as e:
+            pass
+
+        try:
+            self.camera_list[cam]['bg_shared_mem'].unlink()
+        except Exception as e:
+            pass
+
+        try:
+           self.camera_list[cam]['camera_control_pipe'].close()
+           self.camera_list[cam]['message_pipe'].close()
+        except Exception:
+            pass
+        
+             
+    # Close down and tidy up background process(es) that generates camera frames
+    # One process per camera
     def close_down( self ):
+
+        # Close down the watcher that tries to keep the camera background process running
+        self.background_watcher_running = False
 
         # Tell all streams relying on the cameras to stop
         for cam in range(0, len(self.camera_list)):
-            with self.camera_state_change_lock:
-                msg = { 'stop': True }
-                self.send_camera_message( cam, msg )
-
-            self.camera_list[cam]['camera_process'].join( timeout=5 )
-
-            if self.camera_list[cam]['camera_process'].is_alive():
-                self.camera_list[cam]['camera_process'].terminate()
-                self.camera_list[cam]['camera_process'].join( timeout=1 )  # Reclaim PID from process table
-                
-            # Close down shared memory used to transmit frames from the camera
-            try:
-                self.camera_list[cam]['bg_shared_mem'].close()
-                self.camera_list[cam]['bg_shared_mem'].unlink()
-            except Exception as e:
-                pass
+            self.close_down_camera_process( cam )
             
     @staticmethod
     def camera_reset_close(picam2):
@@ -386,39 +417,53 @@ class CameraHandler:
         finally:
             CameraHandler.camera_reset_close(picam2)
             shm.close()
+            msg_pipe.close()
+            control_pipe.close()
 
-    # Thread to check the background process is running
+    # Thread to check the camera management process is running
+    # Restarts the process if it failed
+    # Also listens for messages about recoverable internal failures within the process
     def bg_process_watcher( self ):
-        running = True
         was_msg = False
-        while running:
+        # Don't check if the background process has failed for the first 30 seconds to give it time to start in the first place
+        next_bg_process_check_time = time.time() + 30
+        while self.background_watcher_running:
             for camera in self.camera_list:
-                if camera['message_pipe'].poll(0):
-                    try:
-                        msg = camera['message_pipe'].recv()
-                        if msg is not None:
-                            was_msg = True
-                            print(msg)
-                            if isinstance( msg, dict ):
-                                if 'error' in msg:
-                                    # The camera reset it's resolution so set the config parameters to reflect this
-                                    if 'action' in msg and msg['action'] == 'resolution_reset':
-                                        if 'resolution' in msg and isinstance( msg['resolution'], dict ) and 'camera_num' in msg:
-                                            self.config.write_log_line('error', False, None, '', 'camera', f"Camera failed. Reset resolution and restarted.")
-                                            self.__change_resolution(msg['resolution'], msg['camera_num'])
+                if camera['available']:
+                    if camera['message_pipe'].poll(0):
+                        try:
+                            msg = camera['message_pipe'].recv()
+                            if msg is not None:
+                                was_msg = True
+                                if isinstance( msg, dict ):
+                                    if 'error' in msg:
+                                        # The camera reset it's resolution (due to an error) so reset the config parameters to reflect this change
+                                        if 'action' in msg and msg['action'] == 'resolution_reset':
+                                            if 'resolution' in msg and isinstance( msg['resolution'], dict ) and 'camera_num' in msg:
+                                                self.config.write_log_line('error', False, None, '', 'camera', f"Camera failed. Reset resolution and restarted.")
+                                                self.__change_resolution(msg['resolution'], msg['camera_num'])
 
-                    except Exception as e:
-                        pass
+                        except Exception as e:
+                            pass
 
+            # Restart any failed camera background processes
+            if self.background_watcher_running:
+                if time.time() > next_bg_process_check_time:
+                    for cam_num in range( 0, len( self.camera_list) ):
+                        if not camera['camera_process'].is_alive():
+                            if self.background_watcher_running:
+                                self.config.write_log_line('error', False, None, '', 'camera', f"Camera background process unexpectedly stopped. Attempting restart.")
+                                self.close_down_camera_process( cam_num )
+                                self.camera_list[cam_num] = self.start_camera( cam_num )
+                    
+                    # Check for failures every 10 seconds
+                    next_bg_process_check_time = time.time()+10
 
-            # Immediately test again if there was a message
-            # Need to consume the queue quickly to avoid the background process blocking
+            # If there was a message, immediately test again for another message
+            # Need to consume the queue quickly to avoid the background process blocking due to pipe filling
             if not was_msg:
                 time.sleep(0.2)
-            was_msg = False
-
-        print("**THREAD STOPPEd")    
-            
+            was_msg = False            
 
     def __set_new_rotation( self, rotation, camera_number ):
         with self.option_change_lock:
@@ -819,16 +864,13 @@ class CameraHandler:
         username = username.lower()
         with self.update_login_lock:
             if username in self.logged_in_users:
-                self.logged_in_users[username][camera_num]  -= 1
-                if self.logged_in_users[username][camera_num] < 1:
-                    total_logins_all_cameras = sum(self.logged_in_users[username])
-                    if total_logins_all_cameras > 0:                
-                        self.config.write_log_line('info', False, username, '', 'disconnect', f"User stopped viewing (camera {camera_num}).")
-                    else:
-                        self.config.write_log_line('info', False, username, '', 'disconnect', f"User stopped viewing (all)")
-                        del self.logged_in_users[username]
+                self.logged_in_users[username][camera_num] -= 1
+                total_logins_all_cameras = sum(self.logged_in_users[username])
+                if total_logins_all_cameras < 1:
+                    self.config.write_log_line('info', False, username, '', 'disconnect', f"Stopped viewing.")
+                    del self.logged_in_users[username]
                 else:
-                    self.config.write_log_line('info', False, username, '', 'disconnect', f"Disconnected one session (camera {camera_num}).")
+                    self.config.write_log_line('info', False, username, '', 'disconnect', f"Stopped 1 video stream with {total_logins_all_cameras} streams(s) remaining.")
 
             # If there are no other users connected to this camera - pause the camera
             total_users_this_camera_only = sum(val[camera_num] for val in self.logged_in_users.values())
@@ -902,10 +944,8 @@ class CameraHandler:
             stats_start_time = time.time()
             frames_sent = 0
             bandwidth_bytes_consumed_session = 0
-            running = True
     
-            # This can change if an admin forcibly logs a user out
-            while self.is_user_viewing(username) and self.gunicorn_worker.alive:
+            while self.is_user_viewing(username) and self.gunicorn_worker.alive and self.camera_list[camera_num]['available']:
                 new_frame = False
                 try:
                     msg = config_updates_q.get(block=False)
