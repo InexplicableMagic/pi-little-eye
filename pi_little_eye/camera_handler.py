@@ -1,5 +1,4 @@
 import os
-
 import cv2
 import numpy as np
 from datetime import datetime, timedelta
@@ -9,22 +8,19 @@ from functools import wraps
 import threading
 import time
 import copy
-import gc
 import logging
 import io
 import signal
 import queue
 from multiprocessing import get_context, shared_memory, Pipe
-
 from PIL import Image, ImageDraw
-
 from .db_config_handler import *
 
 class CameraHandler:
 
-    def __init__(self, config ):
+    def __init__(self, config, worker ):
         self.config = config
-        self.camera_paused = True
+        self.gunicorn_worker = worker
         #Currently supports the first found camera
         self.selected_camera_number = config.get_parameter_value( 'cam_number' )
         self.timestamp_scale_name = self.config.get_parameter_value( 'timestamp_scale_factor' )
@@ -70,6 +66,7 @@ class CameraHandler:
                     user_res_height = 480
                     image_rotation_degrees = 0
 
+                camera_details['paused'] = True
                 camera_details['resolutions_wh'] = CameraHandler.resolutions_to_width_height_list( resolutions )
                 camera_details['available_resolutions'] = resolutions
                 camera_details['current_resolution'] = CameraHandler.__suggest_camera_resolution( resolutions, ( user_res_width, user_res_height ) )
@@ -81,26 +78,35 @@ class CameraHandler:
                 self.config.insert_or_update_parameter( f"{camera_num}:image_rotation", 'int', camera_details['current_rotation'] )
                            
                 ctx = get_context("spawn")  # explicit spawn: fresh interpreter, no inherited state
+
                 camera_details['bg_shared_mem'] = shared_memory.SharedMemory(create=True, size=4*1024*1024)
-                camera_details['frame_len'] = ctx.Value("i", 0)   # length in bytes of the current frame
-                camera_details['frame_id'] = ctx.Value("i", -1)    # bumped every time a new frame is published
+                camera_details['frame_len'] = ctx.Value("i", 0)   # Length in bytes of the current frame
+                camera_details['frame_id'] = ctx.Value("i", -1)    # Incremented every time a new frame is published
                 camera_details['frame_gen_lock'] = ctx.Lock()
-                camera_details['camera_control_pipe'], child_cam_control_pipe = Pipe()
-                
+                camera_details['camera_control_pipe'], child_cam_control_pipe = ctx.Pipe()  # For sending configuration changes to the camera processs
+                child_msg_pipe, camera_details['message_pipe'] = ctx.Pipe()  # For sending configuration changes to the camera processs
+                                
                 camera_initial_params = self.generate_camera_parameter_message(camera_num, camera_details=camera_details)
                 camera_details['camera_process'] = ctx.Process(
                     target=CameraHandler.bg_image_producer,
-                    args=(  camera_details['bg_shared_mem'].name, 
+                    args=(  camera_num,
+                            child_msg_pipe,
+                            camera_details['bg_shared_mem'].name, 
                             camera_details['frame_gen_lock'], 
                             camera_details['frame_len'], 
                             camera_details['frame_id'], 
                             child_cam_control_pipe,
                             camera_initial_params ),
-                    daemon=False,
+                    daemon=False
                 )
                 
-                camera_details['camera_process'].start()  
+                camera_details['camera_process'].start()
                 self.camera_list.append( camera_details )
+ 
+        # Thread watches that the background process is running
+        self.bg_process_watcher_thread = threading.Thread(target=self.bg_process_watcher, daemon=True)
+        self.bg_process_watcher_thread.start()
+        
         
     def generate_camera_parameter_message( self, camera_number, camera_details = None ):
         if camera_details is None:
@@ -119,24 +125,33 @@ class CameraHandler:
             }
             
             return cam_param_block
+
+    def send_camera_message( self, camera_num, message ):
+        if camera_num >= 0 and camera_num < len( self.camera_list ):      
+            try:
+                self.camera_list[camera_num]['camera_control_pipe'].send( message )
+                return True
+            except Exception:
+                pass
+        return False     
+
         
     def pause_camera( self, new_state, camera_num ):
         if camera_num >=0 and camera_num < len(self.camera_list):
             with self.camera_state_change_lock:
-                if new_state != self.camera_paused:
-                    self.camera_paused = new_state
-                    msg = {
-                        'paused': new_state
-                    }
-                    self.camera_list[camera_num]['camera_control_pipe'].send( msg )
+                if new_state != self.camera_list[camera_num]['paused']:
+                    self.camera_list[camera_num]['paused'] = new_state
+                    msg = { 'paused': new_state }
+                    self.send_camera_message( camera_num, msg )
                 
     # Close down and tidy up background process that generates camera frames
     def close_down( self ):
+
         # Tell all streams relying on the cameras to stop
         for cam in range(0, len(self.camera_list)):
             with self.camera_state_change_lock:
                 msg = { 'stop': True }
-                self.camera_list[cam]['camera_control_pipe'].send( msg )
+                self.send_camera_message( cam, msg )
 
             self.camera_list[cam]['camera_process'].join( timeout=5 )
 
@@ -189,14 +204,16 @@ class CameraHandler:
 
         return False
     
-    # Starts in the paused state and then needs waking up to generate images
+    # Background process that obtains the camera image
+    # Initially starts in the paused state and then needs waking up to generate images
     @staticmethod
-    def bg_image_producer(shm_name: str, lock, frame_len, frame_id, control_pipe, params):
+    def bg_image_producer(cam_num, msg_pipe, shm_name: str, lock, frame_len, frame_id, control_pipe, params):
         running = True
+
         shm = shared_memory.SharedMemory(name=shm_name)
         # Max FPS to ever use
         max_fps=30
-        # Actual camera setting as some resolutions can't run at the max
+        # Actual camera maximum FPS setting as some resolutions can't handle max_fps
         camera_fps = max_fps
         fid = 0
         parameter_change = True
@@ -204,21 +221,28 @@ class CameraHandler:
         picam2 = None
         paused = True
 
+        # Used for checking if picamera2 module has hung
         signal.signal(signal.SIGALRM, CameraHandler.raise_timeout)
         
         try:
             while running:
                 start_time = time.time()
                 
-                if control_pipe.poll(0):
+                # Check for messages about state or config changes
+                # Use a while loop to drain pending messages to get
+                # to the latest state
+                while control_pipe.poll(0):
                     msg = control_pipe.recv()
                     if msg is not None:
+                        # Check for state change messages
                         if 'paused' in msg:
                             paused = msg['paused']
                         elif 'stop' in msg:
                             if msg['stop']:
                                 running = False
+                                break
                         else:
+                            # This is a config change message
                             camera_restart_required = CameraHandler.camera_restart_needed( params, msg )
                             params = msg
                             parameter_change = True
@@ -314,7 +338,6 @@ class CameraHandler:
                                 continue
                             
                             frame_bytes = encoded.tobytes()
-                            
                             frame_size = len(frame_bytes)
                             
                             # Write JPEG bytes to shared memory
@@ -332,6 +355,14 @@ class CameraHandler:
                             CameraHandler.camera_reset_close(picam2)
                             picam2 = None
                             params['selected_resolution'] = params['available_resolutions'][0]
+
+                            
+                            # Notify the main process of the resolution change
+                            err_type="exception"
+                            if isinstance(e, TimeoutError):
+                                err_type="timeout"
+                            msg_pipe.send( { "camera_num": cam_num, "error": err_type, "message": str(e), 
+                                             "action": "resolution_reset", "resolution": params['selected_resolution'] } )                            
                     
                     # Rate limiting to max FPS of the camera
                     elapsed = time.time() - start_time
@@ -355,6 +386,39 @@ class CameraHandler:
         finally:
             CameraHandler.camera_reset_close(picam2)
             shm.close()
+
+    # Thread to check the background process is running
+    def bg_process_watcher( self ):
+        running = True
+        was_msg = False
+        while running:
+            for camera in self.camera_list:
+                if camera['message_pipe'].poll(0):
+                    try:
+                        msg = camera['message_pipe'].recv()
+                        if msg is not None:
+                            was_msg = True
+                            print(msg)
+                            if isinstance( msg, dict ):
+                                if 'error' in msg:
+                                    # The camera reset it's resolution so set the config parameters to reflect this
+                                    if 'action' in msg and msg['action'] == 'resolution_reset':
+                                        if 'resolution' in msg and isinstance( msg['resolution'], dict ) and 'camera_num' in msg:
+                                            self.config.write_log_line('error', False, None, '', 'camera', f"Camera failed. Reset resolution and restarted.")
+                                            self.__change_resolution(msg['resolution'], msg['camera_num'])
+
+                    except Exception as e:
+                        pass
+
+
+            # Immediately test again if there was a message
+            # Need to consume the queue quickly to avoid the background process blocking
+            if not was_msg:
+                time.sleep(0.2)
+            was_msg = False
+
+        print("**THREAD STOPPEd")    
+            
 
     def __set_new_rotation( self, rotation, camera_number ):
         with self.option_change_lock:
@@ -392,7 +456,7 @@ class CameraHandler:
     def post_camera_options_change( self, camera_number ):
         if camera_number >= 0 and camera_number < len( self.camera_list ):
             msg = self.generate_camera_parameter_message(camera_number)
-            self.camera_list[camera_number]['camera_control_pipe'].send( msg )
+            self.send_camera_message( camera_number, msg )
 
     # Change the camera resolution - can be set whilst the camera is running
     def __change_resolution(self, new_resolution, camera_number):
@@ -408,7 +472,6 @@ class CameraHandler:
                                 #Validates the resolution passed in is a mode available on this camera
                                 if self.camera_detected:
                                     new_resolution = CameraHandler.__suggest_camera_resolution( self.camera_list[camera_number]['available_resolutions'], hw_res )
-                                    
                                     if (new_resolution['resolution'][0] != self.camera_list[camera_number]['current_resolution']['resolution'][0]) or \
                                        (new_resolution['resolution'][1] != self.camera_list[camera_number]['current_resolution']['resolution'][1]):
                                         # Update the config with the selected resolution
@@ -842,7 +905,7 @@ class CameraHandler:
             running = True
     
             # This can change if an admin forcibly logs a user out
-            while self.is_user_viewing(username) and running:
+            while self.is_user_viewing(username) and self.gunicorn_worker.alive:
                 new_frame = False
                 try:
                     msg = config_updates_q.get(block=False)

@@ -694,31 +694,22 @@ stop_event = threading.Event()
 cert_validity_thread = None
 ch = None
 
-# Runs on gunicorn exit to do cleanup of various background processes/threads that started
+# Master process exit hook (not the forked one)
 def on_exit(server):
     stop_event.set()  # Wakes up .wait() instantly
     if cert_validity_thread and cert_validity_thread.is_alive():
         cert_validity_thread.join(timeout=5)
+
+# Called by the gunicorn worker (the forked one) on exit, not the master process
+def worker_exit(server, worker):
+    global ch
     if ch:
         ch.close_down()
 
-# Prevents the gunicorn worker process (forked on boot) trying to handle cleanup of the camera frame producer process
-# which is created independently. This runs just after gunicorn forks from the main process and wipes its knowledge of 
-# the camera process
+# Starts the cameras in the gunicorn forked worker process
 def post_fork(server, worker):
-    import multiprocessing.process
-    import multiprocessing.util
-    from multiprocessing import resource_tracker
-
-    if hasattr(multiprocessing.process, "_children"):
-        multiprocessing.process._children.clear()
-    if hasattr(multiprocessing.util, "_children"):
-        multiprocessing.util._children.clear()
-
-    if getattr(resource_tracker, "_resource_tracker", None) is not None:
-        resource_tracker._resource_tracker._fd = None
-        resource_tracker._resource_tracker._pid = None
-        resource_tracker._resource_tracker = None
+    global ch
+    ch = CameraHandler( dbch, worker )
 
 # Periodically check if we need a new self-signed certificate creating
 def check_cert_validity():
@@ -744,7 +735,7 @@ if __name__ == '__main__':
     check_command_line_args( args, parser )
 
     dbch = DBConfigHandler("security_cam_state.sqlite", args.factory_reset)
-    ch = CameraHandler( dbch )
+    # ch = CameraHandler( dbch )
     dbch.write_log_line( 'info', False, '','', 'software_started', 'Software started' )
     # Option to enable access if the user has locked themselves out due to incorrect IP whitelist settings
     if args.disable_ip_lists:
@@ -782,10 +773,11 @@ if __name__ == '__main__':
         'certfile': certfile,
         'keyfile': keyfile,
         'timeout': 0, # Ensures streaming never gets forcefully terminated
-        'graceful_timeout': 1, # Terminate streams on exit after 1 second
+        'graceful_timeout': 10, # Terminate streams on exit after 1 second
         'preload_app': True,
         'on_exit': on_exit,
-        'post_fork': post_fork
+        'post_fork': post_fork,
+        'worker_exit': worker_exit
     }
     
     StandaloneApplication(app, options).run()
