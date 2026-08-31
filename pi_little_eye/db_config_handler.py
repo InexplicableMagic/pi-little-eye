@@ -104,12 +104,12 @@ class DBConfigHandler:
             )
         ''')
         
-        # List of IPs that are permitted to view the camera or else are blacklisted
-        # If whitelisted is False, then the IP is blacklisted
+        # List of IPs that are permitted to view the camera or else are blocklisted
+        # If allowlisted is False, then the IP is blocklisted
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS ip_allow_list (
             ip TEXT NOT NULL,
-            whitelisted BOOLEAN CHECK (whitelisted IN (0, 1))
+            allowlisted BOOLEAN CHECK (allowlisted IN (0, 1))
         );
         ''')
         
@@ -152,9 +152,9 @@ class DBConfigHandler:
         if self.is_parameters_table_empty():
             # Initial authentication state requires a password to be set
             self.insert_or_update_parameter( 'auth_state', 'string', 'nopass' )
-            # Disable enforcement of IP whitelist and blocklist by default
-            self.disable_ip_whitelist_and_blocklist()
-            # Set the initial IP whitelist and blocklist
+            # Disable enforcement of IP allowlist and blocklist by default
+            self.disable_ip_allowlist_and_blocklist()
+            # Set the initial IP allowlist and blocklist
             self.set_ip_allow_list( [ '192.168.*', '10.*', '172.16.*', 'fc*', 'fd*', '127.0.0.1' ], [] )
             # Expire user login sessions initially after 30 days - forces password re-entry after this number of days
             self.insert_or_update_parameter( 'max_session_age', 'int', 30 )
@@ -181,15 +181,15 @@ class DBConfigHandler:
 
         ip_lists = self.get_ip_allow_list()
         self.ip_response = dict()
-        self.ip_white_list = ip_lists['whitelisted']
-        self.ip_black_list = ip_lists['blacklisted']
-        self.enforce_ip_whitelist = self.get_parameter_value('enforce_ip_whitelist')
+        self.ip_white_list = ip_lists['allowlist']
+        self.ip_block_list = ip_lists['blocklist']
+        self.enforce_ip_allowlist = self.get_parameter_value('enforce_ip_allowlist')
         self.enforce_ip_blocklist = self.get_parameter_value('enforce_ip_blocklist')
     
-    def disable_ip_whitelist_and_blocklist( self ):
-        self.insert_or_update_parameter( 'enforce_ip_whitelist', 'bool', False )
+    def disable_ip_allowlist_and_blocklist( self ):
+        self.insert_or_update_parameter( 'enforce_ip_allowlist', 'bool', False )
         self.insert_or_update_parameter( 'enforce_ip_blocklist', 'bool', False )
-        self.enforce_ip_whitelist = self.get_parameter_value('enforce_ip_whitelist')
+        self.enforce_ip_allowlist = self.get_parameter_value('enforce_ip_allowlist')
         self.enforce_ip_blocklist = self.get_parameter_value('enforce_ip_blocklist')
      
     def write_log_line( self, level, alert, username, ip_route, log_type, message ):
@@ -386,16 +386,16 @@ class DBConfigHandler:
         return False
                 
     # Accepts a list of IP addresses
-    # Returns True if every IP passed on is on the whitelist and none of them are on the blacklist
+    # Returns True if every IP passed on is on the allowlist and none of them are on the blocklist
     def is_ip_list_allowed( self, ip_list_to_check ):
     
-            if len( self.ip_black_list ) > 0:
+            if len( self.ip_block_list ) > 0:
                 if self.enforce_ip_blocklist:
                     for ip in ip_list_to_check:
-                        if DBConfigHandler.ip_matches_wildcard_list( ip, self.ip_black_list ):
+                        if DBConfigHandler.ip_matches_wildcard_list( ip, self.ip_block_list ):
                             return False
             if len( self.ip_white_list ) > 0:
-                if self.enforce_ip_whitelist:
+                if self.enforce_ip_allowlist:
                     for ip in ip_list_to_check:
                         if not DBConfigHandler.ip_matches_wildcard_list( ip, self.ip_white_list ):
                             return False
@@ -1127,17 +1127,17 @@ class DBConfigHandler:
             cursor = conn.cursor()
             delete_all = "DELETE FROM ip_allow_list;"
             cursor.execute(delete_all)
-            set_ip_sql_whitelist = "INSERT INTO ip_allow_list ( ip, whitelisted ) VALUES (?, 1)"
+            set_ip_sql_allowlist = "INSERT INTO ip_allow_list ( ip, allowlisted ) VALUES (?, 1)"
             for ip in ip_white_list:
                 if DBConfigHandler.is_valid_ipv4_or_ipv6_wildcard_range( ip ):
-                    cursor.execute(set_ip_sql_whitelist, ( ip, ) )
-            set_ip_sql_blacklist = "INSERT INTO ip_allow_list ( ip, whitelisted ) VALUES (?, 0)"
+                    cursor.execute(set_ip_sql_allowlist, ( ip, ) )
+            set_ip_sql_blocklist = "INSERT INTO ip_allow_list ( ip, allowlisted ) VALUES (?, 0)"
             for ip in ip_black_list:
                 if DBConfigHandler.is_valid_ipv4_or_ipv6_wildcard_range( ip ):
-                    cursor.execute(set_ip_sql_blacklist, ( ip, ) )
+                    cursor.execute(set_ip_sql_blocklist, ( ip, ) )
             conn.commit()
             self.ip_white_list = ip_white_list
-            self.ip_black_list = ip_black_list
+            self.ip_block_list = ip_black_list
             return True
         except Exception as e:
             print(f"An error occurred (set_ip_allow_list): {e}", file=sys.stderr)
@@ -1151,19 +1151,19 @@ class DBConfigHandler:
     
     def get_ip_allow_list( self ):
         conn = None
-        ip_response = { 'whitelisted': [], 'blacklisted': [] }
+        ip_response = { 'allowlist': [], 'blocklist': [] }
         try:
             # Query to count the number of rows in the table
             conn = self.read_only_connection()
-            query = "SELECT ip FROM ip_allow_list WHERE whitelisted = TRUE;"            
+            query = "SELECT ip FROM ip_allow_list WHERE allowlisted = TRUE;"            
             cursor = conn.cursor()
             cursor.execute(query)
-            whitelisted_ips = [row[0] for row in cursor.fetchall()]
-            query = "SELECT ip FROM ip_allow_list WHERE whitelisted = FALSE;"            
+            allowlisted_ips = [row[0] for row in cursor.fetchall()]
+            query = "SELECT ip FROM ip_allow_list WHERE allowlisted = FALSE;"            
             cursor.execute(query)
-            blacklisted_ips = [row[0] for row in cursor.fetchall()]
-            ip_response['whitelisted'] = whitelisted_ips
-            ip_response['blacklisted'] = blacklisted_ips
+            blocklisted_ips = [row[0] for row in cursor.fetchall()]
+            ip_response['allowlist'] = allowlisted_ips
+            ip_response['blocklist'] = blocklisted_ips
         finally:
             if conn:
                 conn.close()
@@ -1173,87 +1173,106 @@ class DBConfigHandler:
     def get_all_config( self, permissions ):      
         list_of_allowed_ips = self.get_ip_allow_list(  )
         
-        config_data = {  }
+        config_data = { 'security': {}, 'users': {}, 'camera': {}  }
         
         if permissions == 'admin':
             config_data = { 
-                        'error': False, 
-                        'allowed_ips': list_of_allowed_ips,
-                        'enforce_ip_whitelist': self.get_parameter_value('enforce_ip_whitelist'),
-                        'enforce_ip_blocklist': self.get_parameter_value('enforce_ip_blocklist'),
-                        'usernames' : self.list_all_usernames(),
-                        'app_keys' : self.list_all_app_keys(),
-                        'timestamp_scale': self.get_parameter_value('timestamp_scale_factor'),
-                        'display_timestamp': self.get_parameter_value('display_timestamp'),
-                        'timestamp_position': self.get_parameter_value('timestamp_position'),
-                        'display_timestamp': self.get_parameter_value('display_timestamp'),
-                        'max_wifi_bandwidth': self.get_parameter_value('max_wifi_bandwidth')
+                        'error': False,
+                        'security': {
+                            'allowed_ips': list_of_allowed_ips,
+                            'enforce_ip_allowlist': self.get_parameter_value('enforce_ip_allowlist'),
+                            'enforce_ip_blocklist': self.get_parameter_value('enforce_ip_blocklist')
+                        },
+                        'users': {
+                            'usernames' : self.list_all_usernames(),
+                            'app_keys' : self.list_all_app_keys(),
+                        },
+                        'camera':{
+                            'timestamp_scale': self.get_parameter_value('timestamp_scale_factor'),
+                            'display_timestamp': self.get_parameter_value('display_timestamp'),
+                            'timestamp_position': self.get_parameter_value('timestamp_position'),
+                            'display_timestamp': self.get_parameter_value('display_timestamp'),
+                            'max_wifi_bandwidth': self.get_parameter_value('max_wifi_bandwidth')
+                        }
                    }
             
         return config_data
 
+    @staticmethod
+    def all_keys_present( config_object, key_list ):
+        for key in key_list:
+            if key not in config_object:
+                return False
+        return True
+
+    @staticmethod
+    def any_key_present( config_object, key_list ):
+        for key in key_list:
+            if key in config_object:
+                return True
+        return False
+
+    # Validate a posted configuration change received from the UI
+    @staticmethod
     def validate_config_object( config_object ):
-        if config_object:
-            keys = [ 'allowed_ips', 'enforce_ip_whitelist', 'enforce_ip_blocklist', 
-                     'timestamp_position', 'display_timestamp', 'max_wifi_bandwidth', 'cameras' ]
-            for key in keys:
-                if key not in config_object:
+        if config_object and isinstance( config_object, dict ):
+
+            if not DBConfigHandler.any_key_present( config_object, [ 'security', 'camera' ] ):
+                return False
+
+            if 'security' in config_object:
+                security_panel = config_object['security']
+                if not DBConfigHandler.all_keys_present( security_panel, [ 'allowed_ips', 'enforce_ip_allowlist', 'enforce_ip_blocklist' ] ):
                     return False
-            if 'whitelisted' not in config_object['allowed_ips']:
-                return False
-            if 'blacklisted' not in config_object['allowed_ips']:
-                return False
-            if not isinstance(config_object['allowed_ips']['whitelisted'], list):
-                return False
-            if not isinstance(config_object['allowed_ips']['blacklisted'], list):
-                return False
-            if not isinstance(config_object['enforce_ip_whitelist'], bool):
-                return False
-            if not isinstance(config_object['enforce_ip_blocklist'], bool):
-                return False
-            if not isinstance( config_object['timestamp_position'], str ):
-                return False
-            if not isinstance( config_object['display_timestamp'], bool ):
-                return False
-            if not isinstance(config_object['max_wifi_bandwidth'], (int, float)):
-                return False
-            if config_object['max_wifi_bandwidth'] < 0.1 or config_object['max_wifi_bandwidth'] > 100000:
-                return False
-            
-            normalised_whitelisted = []
-            for ip in config_object['allowed_ips']['whitelisted']:
-                normalised_whitelisted.append( DBConfigHandler.expand_ipv6_with_wildcard( ip.strip().lower() ) )
-            config_object['allowed_ips']['whitelisted'] = normalised_whitelisted
-            
-            normalise_blacklisted = []
-            for ip in config_object['allowed_ips']['blacklisted']:
-                normalise_blacklisted.append( DBConfigHandler.expand_ipv6_with_wildcard( ip.strip().lower() ) )
-            config_object['allowed_ips']['blacklisted'] = normalise_blacklisted
-            
-            for ip in (config_object['allowed_ips']['whitelisted'] + config_object['allowed_ips']['blacklisted']):
-                if not DBConfigHandler.is_valid_ipv4_or_ipv6_wildcard_range( ip ):
+                if not DBConfigHandler.all_keys_present( security_panel['allowed_ips'], [ 'allowlist', 'blocklist' ] ):
+                    return False
+                if not isinstance(security_panel['allowed_ips']['allowlist'], list):
+                    return False
+                if not isinstance(security_panel['allowed_ips']['blocklist'], list):
+                    return False
+                if not isinstance(security_panel['enforce_ip_allowlist'], bool):
+                    return False
+                if not isinstance(security_panel['enforce_ip_blocklist'], bool):
                     return False
 
-            if not isinstance( config_object['cameras'], (tuple, list) ):
-                return False
-            for camera in config_object['cameras']:
-                if not 'image_rotation' in camera:
-                    return False
-                if not isinstance( camera['image_rotation'], int ):
-                    return False
-                if camera['image_rotation'] > 270 or camera['image_rotation'] < 0 or (camera['image_rotation'] % 90) != 0:
-                    return False
-                if not 'selected_resolution' in camera:
-                    return False
-                if not isinstance( camera['selected_resolution'], dict ):
-                    return False
-                if not 'resolution' in camera['selected_resolution']:
-                    return False
-                if not isinstance( camera['selected_resolution']['resolution'], (list,tuple) ):
-                    return False
-                if len( camera['selected_resolution']['resolution'] ) != 2:
-                    return False                
+                normalised_allowlisted = []
+                for ip in security_panel['allowed_ips']['allowlist']:
+                    normalised_allowlisted.append( DBConfigHandler.expand_ipv6_with_wildcard( ip.strip().lower() ) )
+                security_panel['allowed_ips']['allowlist'] = normalised_allowlisted
+                
+                normalise_blocklisted = []
+                for ip in security_panel['allowed_ips']['blocklist']:
+                    normalise_blocklisted.append( DBConfigHandler.expand_ipv6_with_wildcard( ip.strip().lower() ) )
+                security_panel['allowed_ips']['blocklist'] = normalise_blocklisted
+                
+                for ip in (security_panel['allowed_ips']['allowlist'] + security_panel['allowed_ips']['blocklist']):
+                    if not DBConfigHandler.is_valid_ipv4_or_ipv6_wildcard_range( ip ):
+                        return False
 
+            if 'camera' in config_object:
+                camera_panel = config_object['camera']
+                if not DBConfigHandler.all_keys_present( camera_panel, [ 'timestamp_position', 'display_timestamp', 'max_wifi_bandwidth', 'cameras' ] ):
+                    return False
+
+                if not isinstance( camera_panel['cameras'], (tuple, list) ):
+                    return False
+                for camera in camera_panel['cameras']:
+                    if not 'image_rotation' in camera:
+                        return False
+                    if not isinstance( camera['image_rotation'], int ):
+                        return False
+                    if camera['image_rotation'] > 270 or camera['image_rotation'] < 0 or (camera['image_rotation'] % 90) != 0:
+                        return False
+                    if not 'selected_resolution' in camera:
+                        return False
+                    if not isinstance( camera['selected_resolution'], dict ):
+                        return False
+                    if not 'resolution' in camera['selected_resolution']:
+                        return False
+                    if not isinstance( camera['selected_resolution']['resolution'], (list,tuple) ):
+                        return False
+                    if len( camera['selected_resolution']['resolution'] ) != 2:
+                        return False  
             return True
         
         return False
@@ -1261,24 +1280,31 @@ class DBConfigHandler:
     # Assumes validated input (use validate_config_object)
     def set_config( self, config_object ):
             with self.config_change_lock:
-                if 'allowed_ips' in config_object:
-                    self.set_ip_allow_list( config_object['allowed_ips']['whitelisted'], config_object['allowed_ips']['blacklisted'] )
-                if 'enforce_ip_whitelist' in config_object:
-                    self.insert_or_update_parameter( 'enforce_ip_whitelist', 'bool', config_object['enforce_ip_whitelist'] )
-                    self.enforce_ip_whitelist = config_object['enforce_ip_whitelist']
-                if 'enforce_ip_blocklist' in config_object:
-                    self.insert_or_update_parameter( 'enforce_ip_blocklist', 'bool', config_object['enforce_ip_blocklist'] )
-                    self.enforce_ip_blocklist = config_object['enforce_ip_blocklist']
-                if 'display_timestamp' in config_object:
-                    self.insert_or_update_parameter( 'display_timestamp', 'bool', config_object['display_timestamp'] )
-                if 'timestamp_position' in config_object:
-                    self.insert_or_update_parameter( 'timestamp_position', 'string' , config_object['timestamp_position'] )
-                if 'timestamp_scale' in  config_object:
-                    self.insert_or_update_parameter( 'timestamp_scale_factor', 'string' , config_object['timestamp_scale'] )
-                if 'display_timestamp' in config_object:
-                    self.insert_or_update_parameter( 'display_timestamp', 'bool' , config_object['display_timestamp'] )
-                if 'max_wifi_bandwidth' in config_object:
-                    self.insert_or_update_parameter( 'max_wifi_bandwidth', 'float', float(config_object['max_wifi_bandwidth']) )
+                
+                if 'security' in config_object:
+                    security_panel = config_object['security']
+                    
+                    if 'allowed_ips' in security_panel:
+                        self.set_ip_allow_list( security_panel['allowed_ips']['allowlist'], security_panel['allowed_ips']['blocklist'] )
+                    if 'enforce_ip_allowlist' in security_panel:
+                        self.insert_or_update_parameter( 'enforce_ip_allowlist', 'bool', security_panel['enforce_ip_allowlist'] )
+                        self.enforce_ip_allowlist = security_panel['enforce_ip_allowlist']
+                    if 'enforce_ip_blocklist' in security_panel:
+                        self.insert_or_update_parameter( 'enforce_ip_blocklist', 'bool', security_panel['enforce_ip_blocklist'] )
+                        self.enforce_ip_blocklist = security_panel['enforce_ip_blocklist']
+
+                if 'camera' in config_object:
+                    camera_panel = config_object['camera']
+                    if 'display_timestamp' in camera_panel:
+                        self.insert_or_update_parameter( 'display_timestamp', 'bool', camera_panel['display_timestamp'] )
+                    if 'timestamp_position' in camera_panel:
+                        self.insert_or_update_parameter( 'timestamp_position', 'string' , camera_panel['timestamp_position'] )
+                    if 'timestamp_scale' in  camera_panel:
+                        self.insert_or_update_parameter( 'timestamp_scale_factor', 'string' , camera_panel['timestamp_scale'] )
+                    if 'display_timestamp' in camera_panel:
+                        self.insert_or_update_parameter( 'display_timestamp', 'bool' , camera_panel['display_timestamp'] )
+                    if 'max_wifi_bandwidth' in camera_panel:
+                        self.insert_or_update_parameter( 'max_wifi_bandwidth', 'float', float(camera_panel['max_wifi_bandwidth']) )
                     
     
     def validate_appkey_auth( self, appkey, secret ):

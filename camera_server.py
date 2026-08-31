@@ -264,8 +264,10 @@ def get_config():
         # Add config that comes from the database settings
         config = dbch.get_all_config( current_user_permissions )
         #Add config based on the current camera state
-        config = ch.append_camera_current_config( config )
-        config['current_username'] = username
+        if current_user_permissions == 'admin':
+            config = ch.append_camera_current_config( config )
+        config['users']['current_username'] = username
+        config['users']['permissions'] = current_user_permissions
         return make_response( jsonify ( config ), 200 )
         
     return response
@@ -291,7 +293,8 @@ def set_config():
                         # Set options to be stored in the config - config must be validated
                         dbch.set_config( post_data )
                         # Set options that change the camera state
-                        ch.set_config( post_data )
+                        if 'camera' in post_data:
+                            ch.change_camera_config( post_data['camera'] )
                         log_entry( 'info', 'config_change', "Modified configuration", alert=False, username=username )
                         response = make_response( jsonify ( { 'error': False, 'message': 'Config set' } ), 200 )
                     else:

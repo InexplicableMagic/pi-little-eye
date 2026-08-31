@@ -276,46 +276,51 @@ function resetConfigOnUI(){
     getConfig()
     .then( config => {
         if(config && 'error' in config && config.error === false) {
-            const ipStringWhitelist = config.allowed_ips.whitelisted.join('\n');
-            const ipStringBlocklist = config.allowed_ips.blacklisted.join('\n');
             
-            lastValidIPAllowList = ipStringWhitelist;
-            lastValidIPBlockList = ipStringBlocklist;
-            
-            const ipWhitelistTextArea = document.getElementById('allowed-ip-list');
-            const ipBlocklistTextArea = document.getElementById('blocked-ip-list');
-            
-            ipWhitelistTextArea.value = ipStringWhitelist;
-            if(config.enforce_ip_whitelist === true){
-                document.getElementById('allowed-ips-radio').checked = true;
-            }else{
-                document.getElementById('any-ip-radio').checked = true;
-            }
-            
-            document.getElementById('enable-blocklist-checkbox').checked = config.enforce_ip_blocklist
-            
-            ipBlocklistTextArea.value = ipStringBlocklist;
-            
-            const timestampPositionSelect = document.getElementById('timestamp-position-select');
-            timestampPositionSelect.value = config.timestamp_position;
-            
-            const displayTimestampCheckbox = document.getElementById('display-timestamp');
-            displayTimestampCheckbox.checked = config.display_timestamp;
-            
-            const timeStampScaleSelect = document.getElementById('timestamp-text-size');
-            timeStampScaleSelect.value = config.timestamp_scale
+            //Populate admin options if config response is admin type
+            if(config.users.permissions === 'admin'){
 
-            const maxWifiBandwidthEntry = document.getElementById( 'max-wifi-bandwidth' );
-            maxWifiBandwidthEntry.value = config.max_wifi_bandwidth
-            
-            generateUserListTable( config.usernames, config.current_username, 'user-list-table' );
-            generateAppKeyTable( config.app_keys, 'app-key-list-table' );
-            
-            //TODO: Update for multiple camera support
-            const cam_num = 0
-            populateSelectWithResolutions( 'camera-resolutions-select', config.cameras[cam_num].available_resolutions, config.cameras[cam_num].current_resolution );
-            const rotationSelect = document.getElementById('camera-rotation-select');
-            rotationSelect.value = config.cameras[cam_num].image_rotation;
+                const ipStringAllowlist = config.security.allowed_ips.allowlist.join('\n');
+                const ipStringBlocklist = config.security.allowed_ips.blocklist.join('\n');
+                
+                lastValidIPAllowList = ipStringAllowlist;
+                lastValidIPBlockList = ipStringBlocklist;
+                
+                const ipAllowlistTextArea = document.getElementById('allowed-ip-list');
+                const ipBlocklistTextArea = document.getElementById('blocked-ip-list');
+                
+                ipAllowlistTextArea.value = ipStringAllowlist;
+                if(config.security.enforce_ip_allowlist === true){
+                    document.getElementById('allowed-ips-radio').checked = true;
+                }else{
+                    document.getElementById('any-ip-radio').checked = true;
+                }
+                
+                document.getElementById('enable-blocklist-checkbox').checked = config.security.enforce_ip_blocklist
+                
+                ipBlocklistTextArea.value = ipStringBlocklist;
+
+                const timestampPositionSelect = document.getElementById('timestamp-position-select');
+                timestampPositionSelect.value = config.camera.timestamp_position;
+                
+                const displayTimestampCheckbox = document.getElementById('display-timestamp');
+                displayTimestampCheckbox.checked = config.camera.display_timestamp;
+                
+                const timeStampScaleSelect = document.getElementById('timestamp-text-size');
+                timeStampScaleSelect.value = config.camera.timestamp_scale
+
+                const maxWifiBandwidthEntry = document.getElementById( 'max-wifi-bandwidth' );
+                maxWifiBandwidthEntry.value = config.camera.max_wifi_bandwidth
+                
+                //TODO: Update for multiple camera support
+                const cam_num = 0
+                populateSelectWithResolutions( 'camera-resolutions-select', config.camera.cameras[cam_num].available_resolutions, config.camera.cameras[cam_num].current_resolution );
+                const rotationSelect = document.getElementById('camera-rotation-select');
+                rotationSelect.value = config.camera.cameras[cam_num].image_rotation;
+
+                generateUserListTable( config.users.usernames, config.users.current_username, 'user-list-table' );
+                generateAppKeyTable( config.users.app_keys, 'app-key-list-table' );
+            }
 
         }else{
             console.log("No config allowed");
@@ -387,51 +392,65 @@ function setupInputAreaNumberValidation( inputAreaId, min, max, doSaveConfig ){
     });
 }
 
-function convertConfigUIStateToJSON(){
-    const ipWhitelistTextArea = document.getElementById('allowed-ip-list');
-    const ipBlocklistTextArea = document.getElementById('blocked-ip-list');
+//null panel means get state of all panels
+//Or only convert a specific panel if only that one has changed
+function convertConfigUIStateToJSON(panel = null){
     const rotationSelect = document.getElementById('camera-rotation-select');
     const timeStampScaleSelect = document.getElementById('timestamp-text-size');
     const timestampPositionSelect = document.getElementById('timestamp-position-select');
     const displayTimestampCheckbox = document.getElementById('display-timestamp');
     const maxWifiBandwidthEntry = document.getElementById( 'max-wifi-bandwidth' );
-    
-    allowed_ip_listing_array = convertStringListToArray( lastValidIPAllowList )
-    blocked_ip_listing_array = convertStringListToArray( lastValidIPBlockList )
-    
-    if( validateIPArray( allowed_ip_listing_array ) && validateIPArray( blocked_ip_listing_array ) ){
-        enforce_whitelisted_ips = true
-        if(document.getElementById('any-ip-radio').checked)
-            enforce_whitelisted_ips = false
-            
+   
+    const postObject = { csrf_token: csrfToken }
+
+    if( panel === null || panel === "security" ){
+        const ipAllowlistTextArea = document.getElementById('allowed-ip-list');
+        const ipBlocklistTextArea = document.getElementById('blocked-ip-list');
+
         enforce_blocklist_ips = document.getElementById('enable-blocklist-checkbox').checked
-        
-        const postObject = {
-               csrf_token: csrfToken,
+
+        allowed_ip_listing_array = convertStringListToArray( lastValidIPAllowList )
+        blocked_ip_listing_array = convertStringListToArray( lastValidIPBlockList )
+
+        if( validateIPArray( allowed_ip_listing_array ) && validateIPArray( blocked_ip_listing_array ) ){
+            enforce_allowlisted_ips = true
+            if(document.getElementById('any-ip-radio').checked)
+                enforce_allowlisted_ips = false
+
+            postObject.security = {
                allowed_ips: {
-                whitelisted: allowed_ip_listing_array,
-                blacklisted: blocked_ip_listing_array
+                allowlist: allowed_ip_listing_array,
+                blocklist: blocked_ip_listing_array
                },
-               enforce_ip_whitelist: enforce_whitelisted_ips,
-               enforce_ip_blocklist: enforce_blocklist_ips,
-               timestamp_scale: timeStampScaleSelect.value,
-               timestamp_position: timestampPositionSelect.value,
-               display_timestamp: displayTimestampCheckbox.checked,
-               max_wifi_bandwidth: Number(maxWifiBandwidthEntry.value),
-               //TODO: Update for multiple cameras - fixed to one at the moment
-               cameras: [
-                   {
-                       camera_number: 0,
-                       selected_resolution: getSelectedResolution( 'camera-resolutions-select' ),
-                       image_rotation: Number(rotationSelect.value),
-                   }
-               ]
-        };
-        return postObject;
-        
-    }else{
-        console.log("Invalid IP array")
+               enforce_ip_allowlist: enforce_allowlisted_ips,
+               enforce_ip_blocklist: enforce_blocklist_ips,   
+            }
+
+        }else{
+            console.log("Invalid IP array")
+        }
     }
+
+    if( panel === null || panel === "camera" ){
+        postObject.camera = {
+          timestamp_scale: timeStampScaleSelect.value,
+           timestamp_position: timestampPositionSelect.value,
+           display_timestamp: displayTimestampCheckbox.checked,
+           max_wifi_bandwidth: Number(maxWifiBandwidthEntry.value),
+           //TODO: Update for multiple cameras - fixed to one at the moment
+           cameras: [
+               {
+                   camera_number: 0,
+                   selected_resolution: getSelectedResolution( 'camera-resolutions-select' ),
+                   image_rotation: Number(rotationSelect.value),
+               }
+           ]
+        }
+    }
+    
+    return postObject;
+        
+    
 }
 
 

@@ -539,7 +539,7 @@ class CameraHandler:
     
     # Takes a posted config change from the UI and converts it into settings changes
     # Must already be validated
-    def set_config( self, post_data ):
+    def change_camera_config( self, post_data ):
         if post_data is not None and isinstance( post_data, dict):
             # Common parameters
             if 'timestamp_scale' in post_data:
@@ -717,7 +717,7 @@ class CameraHandler:
     
 
     def append_camera_current_config(self, config):
-        config['is_camera_available'] = self.is_camera_detected()
+        config['camera']['is_camera_available'] = self.is_camera_detected()
         camera_section = [  ]
         if self.is_camera_detected():
             for i in range(0, len(self.camera_list)):
@@ -729,7 +729,7 @@ class CameraHandler:
                 
                 camera_section.append( this_cam )
             
-        config['cameras'] = camera_section        
+        config['camera']['cameras'] = camera_section        
         return config
     
     # When user config options change, or the resolution changes then change the position of the timestamp text on screen
