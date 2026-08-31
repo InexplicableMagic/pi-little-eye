@@ -224,14 +224,18 @@ function logout( whichUser = null ){
       console.log(response)
       console.log('Network error returned from logout');
     }
-    // Should display the login screen
-    setWindowVisibilityState();
-    // Disconnect the video feed which may still be running behind the scenes
-    const vfIMGElement = document.getElementById('video-feed');
-    if(vfIMGElement){
-        vfIMGElement.onerror = null;
-        vfIMGElement.src="";
-        vfIMGElement.remove();
+
+    // If we are logging outselves out
+    if(whichUser == null){
+        // Should display the login screen
+        setWindowVisibilityState();
+        // Disconnect the video feed which may still be running behind the scenes
+        const vfIMGElement = document.getElementById('video-feed');
+        if(vfIMGElement){
+            vfIMGElement.onerror = null;
+            vfIMGElement.src="";
+            vfIMGElement.remove();
+        }
     }
     return response.json();
   });
@@ -603,109 +607,81 @@ function login( username, password ){
     });
 }
 
-//Convert the list of camera users into an HTML table
-//for display in the configuration options
 function generateUserListTable(data, current_username, divId) {
-
-  // Get the target div
   const targetDiv = document.getElementById(divId);
-  if (!targetDiv) {
-    console.error(`Div with id "${divId}" not found.`);
-    return;
-  }
+  if (!targetDiv) return console.error(`Div with id "${divId}" not found.`);
 
-  const columns = [
-    { key: 'username', label: 'User' },
-    { key: 'permissions', label: 'Group' },
-    { key: 'disabled', label: 'Locked' },
-    { key: 'active_sessions', label: 'Logged In' }
-  ];
-
-  const table = document.createElement('table');
-  table.id=userTableID
-  table.style.border = '1px solid black';
-  table.style.borderCollapse = 'collapse';
-
-  const thead = table.createTHead();
-  const headerRow = thead.insertRow();
-  columns.forEach(column => {
-    const th = document.createElement('th');
-    th.textContent = column.label;
-    th.style.border = '1px solid black';
-    th.style.padding = '5px';
-    headerRow.appendChild(th);
-  });
-
-  const tbody = table.createTBody();
-  data.forEach(user_data => {
-    const row = tbody.insertRow();
-    columns.forEach(column => {
-      const cell = row.insertCell();
-      cell.textContent = user_data[column.key];
-      cell.style.border = '1px solid black';
-      cell.style.padding = '5px';
-      
-      if( user_data.username != current_username ){
-          if(column.key == 'username' ){
-            const button = document.createElement('button');
-            button.textContent = 'Delete';
-            button.style.marginLeft = '5px';
-            button.addEventListener('click', 
-                () => {
-                    showModal( "Delete user?", 
-                                () => {
-                                lockUnlockDelete( user_data.username, 'delete' ).then ( () => {
-                                            resetConfigOnUI() })
-                                }
-                            )
-                    }
-            );
-            
-            cell.appendChild(button);
-          }
-          
-          if(column.key == 'active_sessions' && user_data[column.key] == 'yes'){
-            const button = document.createElement('button');
-            button.textContent = 'Logout';
-            button.style.marginLeft = '5px';
-            button.addEventListener('click', () => {
-                logout( whichUser=user_data.username ).then ( () => {
-                    resetConfigOnUI()
-                });
-            });
-            cell.appendChild(button);
-           }
-
-          if(column.key == 'disabled' ){
-            const button = document.createElement('button');
-            button.style.marginLeft = '5px';
-            
-                if( user_data[column.key] == 'yes' ){
-                    button.textContent = 'Unlock';
-                    button.addEventListener('click', () => {
-                        lockUnlockDelete( user_data.username, 'unlock' ).then ( () => {
-                            resetConfigOnUI();
-                        });
-                    });
-                }else{
-                    button.textContent = 'Lock';
-                    button.addEventListener('click', () => {
-                       lockUnlockDelete( user_data.username, 'lock' ).then ( () => {
-                            resetConfigOnUI();
-                        });
-                    });
-                }
-                cell.appendChild(button);
-           }
-           
-       }
-    
-  });
-  });
-
-  // Clear the target div and append the table
   targetDiv.innerHTML = '';
-  targetDiv.appendChild(table);
+
+  const container = document.createElement('div');
+  container.className = 'user-card-list';
+
+  data.forEach((userData) => {
+    const isCurrentUser = userData.username === current_username;
+    const isLocked = userData.disabled === 'yes';
+    const isLoggedIn = userData.active_sessions === 'yes';
+
+    const card = document.createElement('div');
+    card.className = 'user-card';
+
+    // Header & Status Badges (Static Markup)
+    card.innerHTML = `
+      <div class="user-card-header">
+        <span class="user-card-name">
+          ${userData.username}${isCurrentUser ? ' <span class="user-card-you">(You)</span>' : ''}
+        </span>
+        <span class="user-card-group">${userData.permissions}</span>
+      </div>
+      <div class="user-card-status-row">
+        <span class="status-badge ${isLocked ? 'locked' : 'unlocked'}">
+          ${isLocked ? '🔒 Locked' : '🔓 Unlocked'}
+        </span>
+        <span class="status-badge ${isLoggedIn ? 'logged-in' : 'logged-out'}">
+          ${isLoggedIn ? '🟢 Logged In' : '⚪ Logged Out'}
+        </span>
+      </div>
+    `;
+
+    // Action Buttons Row (Only for other users)
+    if (!isCurrentUser) {
+      const actionsRow = document.createElement('div');
+      actionsRow.className = 'user-card-actions';
+
+      // 1. Lock/Unlock Button
+      const lockBtn = document.createElement('button');
+      lockBtn.textContent = isLocked ? 'Unlock' : 'Lock';
+      lockBtn.addEventListener('click', () => {
+        lockUnlockDelete(userData.username, isLocked ? 'unlock' : 'lock').then(() => resetConfigOnUI());
+      });
+      actionsRow.appendChild(lockBtn);
+
+      // 2. Logout Button (If active session)
+      if (isLoggedIn) {
+        const logoutBtn = document.createElement('button');
+        logoutBtn.textContent = 'Logout';
+        logoutBtn.addEventListener('click', () => {
+          logout(userData.username).then(() => resetConfigOnUI());
+        });
+        actionsRow.appendChild(logoutBtn);
+      }
+
+      // 3. Delete Button
+      const deleteBtn = document.createElement('button');
+      deleteBtn.textContent = 'Delete';
+      deleteBtn.addEventListener('click', () => {
+        showModal('Delete user?', () => {
+          lockUnlockDelete(userData.username, 'delete').then(() => resetConfigOnUI());
+        });
+      });
+      actionsRow.appendChild(deleteBtn);
+
+      card.appendChild(actionsRow);
+    }
+
+    container.appendChild(card);
+  });
+
+  targetDiv.appendChild(container);
 }
 
 function generateAppKeyTable(data, appKeyDiv) {
