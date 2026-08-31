@@ -16,7 +16,7 @@ body {
     left: 0;
     height: 100%;
     width: 90%; /* Set default width to 90% */
-    max-width: 800px; /* Maximum width for larger screens */
+    max-width: 500px; /* Maximum width for larger screens */
     /*padding: 10px;*/
     box-sizing: border-box; /* Include padding in width calculation */
     box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
