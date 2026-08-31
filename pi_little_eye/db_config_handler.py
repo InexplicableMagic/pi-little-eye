@@ -99,11 +99,20 @@ class DBConfigHandler:
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS parameters (
                 key TEXT PRIMARY KEY NOT NULL UNIQUE,
-                datatype TEXT,
+                datatype TEXT NOT NULL,
                 value TEXT
             )
         ''')
         
+
+        # Entries for the Subject Alt Names list for the self-signed certificate
+        # name = object as plain text
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS certsan (
+                name TEXT NOT NULL
+            )
+        ''')
+
         # List of IPs that are permitted to view the camera or else are blocklisted
         # If allowlisted is False, then the IP is blocklisted
         cursor.execute('''
@@ -1431,3 +1440,53 @@ class DBConfigHandler:
             if conn:
                 conn.close()
     
+    def get_all_san_names( self ):
+        conn = None
+        try:
+            conn = self.read_only_connection()
+            cursor = conn.cursor()
+            app_key_listing_sql = "SELECT name FROM certsan;"
+            cursor.execute(app_key_listing_sql)
+            results = cursor.fetchall()
+            san_names = [  ]
+            for result in results:
+                san_names.append( result[0] )
+            return san_names
+        except Exception as e:
+            print(f"An error occurred (get_all_san_names): {e}", file=sys.stderr)
+            self.write_log_line( 'error', False, '', '', 'exception', f"An error occurred (get_all_san_names): {e}" )
+            return [ ]    
+        finally:
+            if conn:
+                conn.close()
+
+    def save_all_san_names( self, names_list ):
+        if names_list is not None and isinstance( names_list, ( list, tuple ) ):
+            valid_names = set()
+            for name in names_list:
+                name = name.strip().lower()
+                if DBConfigHandler.validate_utf8_string(name, min_length=1, max_length=253):
+                    valid_names.add( name )
+            if len( valid_names ) > 0:
+                try:
+                    conn = sqlite3.connect(self.db_path)
+                    cursor = conn.cursor()
+                    delete_all = "DELETE FROM certsan;"
+                    cursor.execute(delete_all)
+                    conn.executemany("INSERT INTO certsan (name) VALUES (?);", [(name,) for name in list(valid_names)], )
+                    conn.commit()
+                    return True
+                except Exception as e:
+                    print(f"An error occurred (save_all_san_names): {e}", file=sys.stderr)
+                    self.write_log_line( 'error', False, '', '', 'exception', f"An error occurred (save_all_san_names): {e}" )
+                    if conn:
+                        conn.rollback()
+                    return False
+                finally:
+                    if conn:
+                        conn.close()
+
+            return False                 
+            
+            
+

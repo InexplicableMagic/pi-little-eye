@@ -722,7 +722,7 @@ def check_cert_validity():
             # Regenerates self-signed cert if near expiry
             # Apparently gunicorn auto-rereads the certificate/key files on every connection
             # therefore there is no need to inform gunicorn of the update
-            CertificateHandler.update_tls_certificates()
+            CertificateHandler.update_tls_certificates(dbch)
     
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Raspberry Pi Security Camera")
@@ -754,10 +754,10 @@ if __name__ == '__main__':
         certfile = args.certificate
     else:
         # Generate a self-sign TLS certificate by default so the user doesn't have to supply one
-        CertificateHandler.update_tls_certificates()
+        CertificateHandler.update_tls_certificates( dbch )
         # If the user wants to add an additional name to the certificate SAN, then add it and exit
         if args.additional_cert_name:
-            CertificateHandler.add_dns_name_to_certificate(args.additional_cert_name)
+            CertificateHandler.add_dns_name_to_certificate(dbch, args.additional_cert_name)
             sys.exit(0)
         keyfile = CertificateHandler.get_key_file_path()
         certfile = CertificateHandler.get_cert_file_path()
