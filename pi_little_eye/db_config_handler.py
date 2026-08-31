@@ -1254,6 +1254,11 @@ class DBConfigHandler:
                 if not DBConfigHandler.all_keys_present( camera_panel, [ 'timestamp_position', 'display_timestamp', 'max_wifi_bandwidth', 'cameras' ] ):
                     return False
 
+                if not isinstance( camera_panel['max_wifi_bandwidth'], ( int, float ) ):
+                    return False
+                if not isinstance( camera_panel['timestamp_position'], str ):
+                    return False
+
                 if not isinstance( camera_panel['cameras'], (tuple, list) ):
                     return False
                 for camera in camera_panel['cameras']:
@@ -1272,7 +1277,12 @@ class DBConfigHandler:
                     if not isinstance( camera['selected_resolution']['resolution'], (list,tuple) ):
                         return False
                     if len( camera['selected_resolution']['resolution'] ) != 2:
-                        return False  
+                        return False
+                    if not isinstance( camera['selected_resolution']['resolution'][0], int ):
+                        return False
+                    if not isinstance( camera['selected_resolution']['resolution'][1], int ):
+                        return False
+
             return True
         
         return False

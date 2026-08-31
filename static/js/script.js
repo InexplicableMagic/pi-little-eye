@@ -374,7 +374,7 @@ function validateNumberInputAreaInRange( inputArea, min, max ) {
     }
 }
 
-function setupInputAreaNumberValidation( inputAreaId, min, max, doSaveConfig ){
+function setupInputAreaNumberValidation( inputAreaId, min, max, doSaveConfig, panel=null ){
     const inputArea = document.getElementById(inputAreaId);
 
     let debounceTimeout;
@@ -385,7 +385,7 @@ function setupInputAreaNumberValidation( inputAreaId, min, max, doSaveConfig ){
         debounceTimeout = setTimeout(() => {
             if( validateNumberInputAreaInRange(this, min, max) ){
                 if(doSaveConfig){
-                    saveConfig();            
+                    saveConfig(panel);            
                 }
             }
         }, 500);
@@ -455,8 +455,8 @@ function convertConfigUIStateToJSON(panel = null){
 
 
 
-function saveConfig(){
-    config_state_as_json_object = convertConfigUIStateToJSON()
+function saveConfig(panel=null){
+    config_state_as_json_object = convertConfigUIStateToJSON(panel)
     return fetch(setConfigURL, {
     method: 'POST',
         headers: {
@@ -997,7 +997,7 @@ function addEventListeners() {
     document.addEventListener('DOMContentLoaded', function() {
         setupTextAreaValidation('allowed-ip-list');
         setupTextAreaValidation('blocked-ip-list');
-        setupInputAreaNumberValidation( 'max-wifi-bandwidth', 0.1, 100000, true )
+        setupInputAreaNumberValidation( 'max-wifi-bandwidth', 0.1, 100000, true, "camera" )
     });
    
     // Restart the video if the page becomes visible after previously being hidden
@@ -1064,7 +1064,7 @@ function saveIPChangesConfig(){
     lastValidIPAllowList = allowedIPTextArea.value;
     lastValidIPBlockList = blockedIPTextArea.value;
     
-    saveConfig();    
+    saveConfig("security");    
 }
 
 // Determine if the user is authenticated - used to choose which window to display
