@@ -624,13 +624,14 @@ function generateUserListTable(data, current_username, divId) {
     const card = document.createElement('div');
     card.className = 'user-card';
 
-    // Header & Status Badges (Static Markup)
+    // Header (Identity details grouped on the left)
     card.innerHTML = `
       <div class="user-card-header">
-        <span class="user-card-name">
-          ${userData.username}${isCurrentUser ? ' <span class="user-card-you">(You)</span>' : ''}
-        </span>
-        <span class="user-card-group">${userData.permissions}</span>
+        <div class="user-card-identity">
+          <span class="user-card-name">${userData.username}</span>
+          <span class="user-card-group">${userData.permissions}</span>
+          ${isCurrentUser ? '<span class="user-card-you">(You)</span>' : ''}
+        </div>
       </div>
       <div class="user-card-status-row">
         <span class="status-badge ${isLocked ? 'locked' : 'unlocked'}">
@@ -642,22 +643,40 @@ function generateUserListTable(data, current_username, divId) {
       </div>
     `;
 
-    // Action Buttons Row (Only for other users)
+    // Menu Toggle & Action Buttons (Only for other users)
     if (!isCurrentUser) {
-      const actionsRow = document.createElement('div');
-      actionsRow.className = 'user-card-actions';
+      const header = card.querySelector('.user-card-header');
 
-      // 1. Lock/Unlock Button
+      // Create Three-Dot Menu Button (Pushed to far right)
+      const menuBtn = document.createElement('button');
+      menuBtn.className = 'menu-toggle-btn';
+      menuBtn.innerHTML = '&#8942;'; // Vertical ellipsis (⋮)
+      menuBtn.setAttribute('aria-label', 'Toggle action menu');
+      header.appendChild(menuBtn);
+
+      // Create Actions Row (Hidden by default)
+      const actionsRow = document.createElement('div');
+      actionsRow.className = 'user-card-actions hidden';
+
+      // Toggle Visibility Event
+      menuBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        actionsRow.classList.toggle('hidden');
+      });
+
+      // Lock/Unlock Button
       const lockBtn = document.createElement('button');
+      lockBtn.className = 'user-btn';
       lockBtn.textContent = isLocked ? 'Unlock' : 'Lock';
       lockBtn.addEventListener('click', () => {
         lockUnlockDelete(userData.username, isLocked ? 'unlock' : 'lock').then(() => resetConfigOnUI());
       });
       actionsRow.appendChild(lockBtn);
 
-      // 2. Logout Button (If active session)
+      // Logout Button (If active session)
       if (isLoggedIn) {
         const logoutBtn = document.createElement('button');
+        logoutBtn.className = 'user-btn';
         logoutBtn.textContent = 'Logout';
         logoutBtn.addEventListener('click', () => {
           logout(userData.username).then(() => resetConfigOnUI());
@@ -665,8 +684,9 @@ function generateUserListTable(data, current_username, divId) {
         actionsRow.appendChild(logoutBtn);
       }
 
-      // 3. Delete Button
+      // Delete Button
       const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'user-btn';
       deleteBtn.textContent = 'Delete';
       deleteBtn.addEventListener('click', () => {
         showModal('Delete user?', () => {

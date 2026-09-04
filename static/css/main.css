@@ -376,6 +376,7 @@ body {
 
 /* ~~~ User Management Styling ~~~ */
 
+
 /* Mobile User Card Table */
 .user-card-list {
   display: flex;
@@ -402,16 +403,18 @@ body {
   margin-bottom: 6px;
 }
 
+/* Groups username, role badge, and (You) tag neatly together */
+.user-card-identity {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .user-card-name {
   font-weight: 600;
   font-size: 14px;
   color: #111827;
-}
-
-.user-card-you {
-  font-weight: normal;
-  font-size: 11px;
-  color: #6b7280;
 }
 
 .user-card-group {
@@ -422,6 +425,30 @@ body {
   color: #4b5563;
   font-weight: 500;
   text-transform: uppercase;
+}
+
+.user-card-you {
+  font-weight: normal;
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.menu-toggle-btn {
+  background: transparent;
+  border: none;
+  font-size: 16px;
+  font-weight: bold;
+  color: #6b7280;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  line-height: 1;
+  margin-left: auto; /* Pushes button to top-right corner */
+}
+
+.menu-toggle-btn:hover {
+  background-color: #f3f4f6;
+  color: #111827;
 }
 
 .user-card-status-row {
@@ -464,17 +491,25 @@ body {
   margin-top: 6px;
 }
 
+.user-card-actions.hidden {
+  display: none;
+}
+
 .user-btn {
   flex: 1;
   padding: 4px 0;
   font-size: 12px;
   font-weight: 500;
+  border: 1px solid #d1d5db;
+  background-color: #f9fafb;
   border-radius: 4px;
   cursor: pointer;
   text-align: center;
 }
 
-
+.user-btn:hover {
+  background-color: #f3f4f6;
+}
 
 /* ~~~ General text styles ~~~ */
 
