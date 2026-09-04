@@ -670,6 +670,46 @@ body {
   background-color: #f3f4f6;
 }
 
+/* ~~~ Logs Display styles ~~~ */
+
+.logs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+  table-layout: fixed; /* Ensures table stays within container width */
+}
+
+.logs-table th,
+.logs-table td {
+  border: 1px solid #ccc;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.logs-table th {
+  background-color: #e9e9e9;
+  font-weight: bold;
+}
+
+/* Metadata Row (Row 1) */
+.log-meta-row td {
+  border-bottom: 1px dashed #e0e0e0;
+  background-color: #fcfcfc;
+  font-weight: 500;
+}
+
+/* Message Row (Row 2) */
+.log-message-row td {
+  border-top: none;
+  border-bottom: 2px solid #888; /* Stronger divider between distinct log entries */
+  word-break: break-all; /* Wraps long UUIDs/hashes so they don't force horizontal scroll */
+  background-color: #ffffff;
+  font-family: monospace, monospace;
+  color: #222;
+  padding-left: 12px;
+}
+
 /* ~~~ General text styles ~~~ */
 
 .warning-message-text {

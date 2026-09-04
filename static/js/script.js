@@ -785,49 +785,53 @@ function getSelectedResolution(selectName) {
     return { resolution: [width, height] };
 }
 
-function convertLogDataToHTMLTable( log_data ){
-
-    const column_ordering = [
-        { key:'Datestamp', col_num: 1 },
-        { key:'Username', col_num: 4 },
-        { key:'IP', col_num: 5 },
-        { key:'Message', col_num: 7 },
-        { key:'Level', col_num: 2 }
-     ]
+function convertLogDataToHTMLTable(log_data) {
+    // Columns for the top row (Row 1)
+    const top_row_columns = [
+        { key: 'Datestamp', col_num: 1 },
+        { key: 'Username', col_num: 4 },
+        { key: 'IP', col_num: 5 },
+        { key: 'Level', col_num: 2 }
+    ];
     
-    // Create Table
-    const table = document.createElement('table');
-    table.id='logs-table'
-    table.style.border = '1px solid black';
-    table.style.borderCollapse = 'collapse';
+    const message_col_num = 7; // Message index
 
-    // Column headings  
+    const table = document.createElement('table');
+    table.id = 'logs-table';
+    table.className = 'logs-table';
+
+    // Header Row (Top Row Metadata Headings)
     const thead = table.createTHead();
     const headerRow = thead.insertRow();
-    column_ordering.forEach( column_header => {
+    top_row_columns.forEach(column => {
         const th = document.createElement('th');
-        th.textContent = column_header.key;
-        th.style.border = '1px solid black';
-        th.style.padding = '5px';
+        th.textContent = column.key;
         headerRow.appendChild(th);
     });
-    
-    // Insert the table rows
+
     const tbody = table.createTBody();
+
     log_data.forEach(log_line => {
-        const row = tbody.insertRow();
-        column_ordering.forEach(column => {
-          const cell = row.insertCell();
-          cell.textContent = log_line[column.col_num];
-          cell.style.border = '1px solid black';
-          cell.style.padding = '5px';
+        // Row 1: Datestamp, Username, IP, Level
+        const metaRow = tbody.insertRow();
+        metaRow.className = 'log-meta-row';
+
+        top_row_columns.forEach(column => {
+            const cell = metaRow.insertCell();
+            cell.textContent = log_line[column.col_num] ?? '';
         });
-   });
-    
-    return table
 
+        // Row 2: Message (Spans across all 4 columns)
+        const messageRow = tbody.insertRow();
+        messageRow.className = 'log-message-row';
+
+        const messageCell = messageRow.insertCell();
+        messageCell.colSpan = top_row_columns.length;
+        messageCell.textContent = log_line[message_col_num] ?? '';
+    });
+
+    return table;
 }
-
 
 function addLogsToUI( before_id= null){
     getLogData(before_id)
