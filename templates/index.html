@@ -83,18 +83,45 @@
                         <span id="add-new-user-info"></span>
                     </div>  
                 </div>
-                <div id="app-key-management-section" class="configuration-section" >
+                <div id="app-key-management-section" class="configuration-section">
+                  <!-- Section Header -->
+                  <div class="config-section-header">
                     <span class="section-title">Manage Application Keys</span>
-                    <div id="app-key-list-table"></div>
-                    <button id="generate-app-key-button" onclick="generate_appkey()" >New App Key</button>
-                    <div id="new-app-key-display-area" class="vertical-list">
-                        <table>
-                            <tr><td><span class="bold-text">AppKey</span></td><td><span id="new-appkey-display-span" class="monospace-text"></span></td></tr>
-                            <tr><td><span class="bold-text">Secret</span></td><td><span id="new-secret-display-span" class="monospace-text"></span></td></tr>
-                        </table>
-                        <span class="warning-message-text">&#9888;The secret is displayed only once<span>
+                    <div class="vertical-list">
+                        <button id="generate-app-key-button" class="btn-primary" onclick="generate_appkey()">
+                            <span>+</span> New App Key
+                        </button>
                     </div>
-                    
+                  </div>
+
+                  <!-- One-Time Secret Callout Banner (Hidden by default) -->
+                  <div id="new-app-key-display-area" class="key-secret-callout hidden">
+                    <div class="callout-header">
+                      <span class="warning-badge">&#9888; Secret displayed only once</span>
+                      <button class="callout-close-btn" onclick="showAppKeyDisplayArea(false)" title="Dismiss">&times;</button>
+                    </div>
+
+                    <div class="key-secret-grid">
+                      <div class="key-field">
+                        <label class="field-label">AppKey</label>
+                        <div class="copy-field-group">
+                          <code id="new-appkey-display-span"></code>
+                          <button class="btn-copy" onclick="copyTextFromElement('new-appkey-display-span', this)">Copy</button>
+                        </div>
+                      </div>
+
+                      <div class="key-field">
+                        <label class="field-label">Secret</label>
+                        <div class="copy-field-group">
+                          <code id="new-secret-display-span"></code>
+                          <button class="btn-copy" onclick="copyTextFromElement('new-secret-display-span', this)">Copy</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- App Key Rendered Cards List -->
+                  <div id="app-key-list-table"></div>
                 </div>
                 <div id="change-user-password-section" class="configuration-section" >
                     <span class="section-title">Change Current User Password</span>

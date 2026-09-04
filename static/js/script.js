@@ -323,7 +323,7 @@ function resetConfigOnUI(){
                 rotationSelect.value = config.camera.cameras[cam_num].image_rotation;
 
                 generateUserListTable( config.users.usernames, config.users.current_username, 'user-list-table' );
-                generateAppKeyTable( config.users.app_keys, 'app-key-list-table' );
+                generateAppKeyListTable( config.users.app_keys, 'app-key-list-table' );
             }
 
         }else{
@@ -704,55 +704,45 @@ function generateUserListTable(data, current_username, divId) {
   targetDiv.appendChild(container);
 }
 
-function generateAppKeyTable(data, appKeyDiv) {
+function generateAppKeyListTable(data, divId = 'app-key-list-table') {
+  const targetDiv = document.getElementById(divId);
+  if (!targetDiv) return console.error(`Div with id "${divId}" not found.`);
 
-  // Get the target div
-  const targetDiv = document.getElementById(appKeyDiv);
-  if (!targetDiv) {
-    console.error(`Div with id "${appKeyDiv}" not found.`);
+  targetDiv.innerHTML = '';
+
+  if (!data || data.length === 0) {
+    targetDiv.innerHTML = `<div class="empty-state">No application keys found.</div>`;
     return;
   }
-  
-  const table = document.createElement('table');
-  table.id=userTableID
-  table.style.border = '1px solid black';
-  table.style.borderCollapse = 'collapse';
 
-  const thead = table.createTHead();
-  const headerRow = thead.insertRow();
-  const th = document.createElement('th');
-  th.textContent = "App Key"
-  th.style.border = '1px solid black';
-  th.style.padding = '5px';
-  headerRow.appendChild(th);
-  
-  const tbody = table.createTBody();
-  data.forEach(appkey => {
-    const row = tbody.insertRow();
-    const cell = row.insertCell();
-    
-    var keySpan = document.createElement('span');
-    keySpan.className = 'monospace-text';
-    keySpan.textContent = appkey 
-    cell.appendChild( keySpan );
-    cell.style.border = '1px solid black';
-    cell.style.padding = '5px';
-    
-    const button = document.createElement('button');
-    button.textContent = 'Delete';
-    button.style.marginLeft = '5px';
-    button.addEventListener('click', () => {
-        deleteAppKey( appkey ).then ( () => {
-            resetConfigOnUI();
-        });
+  const container = document.createElement('div');
+  container.className = 'user-card-list';
+
+  data.forEach((keyData) => {
+    const card = document.createElement('div');
+    card.className = 'user-card app-key-card';
+
+    card.innerHTML = `
+      <div class="app-key-card-body">
+        <div class="app-key-info">
+          <code class="app-key-code">${keyData}</code>
+        </div>
+        <button class="trash-btn" title="Delete App Key" aria-label="Delete App Key">&#128465;</button>
+      </div>
+    `;
+
+    // UTF-8 Trash Can Click Handler
+    const deleteBtn = card.querySelector('.trash-btn');
+    deleteBtn.addEventListener('click', () => {
+      showModal(`Delete App Key "${keyData}"?`, () => {
+        deleteAppKey(keyData).then(() => resetConfigOnUI());
+      });
     });
-    cell.appendChild(button);
-    
+
+    container.appendChild(card);
   });
-  
-  targetDiv.innerHTML = '';
-  targetDiv.appendChild(table);
-  
+
+  targetDiv.appendChild(container);
 }
 
 
@@ -1246,17 +1236,28 @@ function showModal(text, onOkCallback) {
     }
 }
 
-// Show the area that displays a new app key and secret after creation
-function showAppKeyDisplayArea( show ){
-    const appKeyDisplayArea = document.getElementById('new-app-key-display-area');
-    if(show){
-        appKeyDisplayArea.style.display = 'block';
-    }else{
-        
-        appKeyDisplayArea.style.display = 'none';
-        const appKeyText = document.getElementById('new-appkey-display-span');
-        const secretText = document.getElementById('new-secret-display-span');
-        appKeyText.innerHTML='';
-        secretText.innerHTML='';
-    }
-} 
+function showAppKeyDisplayArea(show) {
+  const appKeyDisplayArea = document.getElementById('new-app-key-display-area');
+  if (show) {
+    appKeyDisplayArea.classList.remove('hidden');
+  } else {
+    appKeyDisplayArea.classList.add('hidden');
+    document.getElementById('new-appkey-display-span').textContent = '';
+    document.getElementById('new-secret-display-span').textContent = '';
+  }
+}
+
+function copyTextFromElement(elementId, buttonEl) {
+  const text = document.getElementById(elementId).textContent;
+  if (!text) return;
+
+  navigator.clipboard.writeText(text).then(() => {
+    const originalText = buttonEl.textContent;
+    buttonEl.textContent = 'Copied!';
+    buttonEl.classList.add('copied');
+    setTimeout(() => {
+      buttonEl.textContent = originalText;
+      buttonEl.classList.remove('copied');
+    }, 1800);
+  });
+}

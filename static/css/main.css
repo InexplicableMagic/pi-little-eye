@@ -323,9 +323,145 @@ body {
 
 /* ~~~ Section displayed when a new app key is created ~~~ */
 
-#new-app-key-display-area {
-    display: none;
-    margin: 10px;
+.app-key-card-body {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.app-key-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.app-key-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.app-key-date {
+  font-size: 11px;
+  color: #6b7280;
+}
+
+/* UTF-8 Trash Can Button */
+.trash-btn {
+  background: transparent;
+  border: none;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  transition: background-color 0.15s ease;
+}
+
+.trash-btn:hover {
+  background-color: #fee2e2;
+}
+
+/* Secret Callout Banner */
+.key-secret-callout {
+  background-color: #fffbeb;
+  border: 1px solid #fef3c7;
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+
+.key-secret-callout.hidden {
+  display: none;
+}
+
+.callout-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.warning-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: #b45309;
+}
+
+.callout-close-btn {
+  background: transparent;
+  border: none;
+  font-size: 16px;
+  color: #92400e;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 4px;
+}
+
+.key-secret-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.key-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.field-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #4b5563;
+}
+
+.copy-field-group {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+
+.copy-field-group code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  color: #111827;
+  word-break: break-all;
+}
+
+.btn-copy {
+  background-color: #f3f4f6;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  cursor: pointer;
+  color: #374151;
+  margin-left: 8px;
+  white-space: nowrap;
+}
+
+.btn-copy:hover {
+  background-color: #e5e7eb;
+}
+
+.btn-copy.copied {
+  background-color: #dcfce7;
+  color: #166534;
+  border-color: #86efac;
+}
+
+.empty-state {
+  font-size: 13px;
+  color: #6b7280;
+  text-align: center;
+  padding: 12px 0;
 }
 
 /* ~~~ Styles for the initial password setting screen and the login screen ~~~ */
