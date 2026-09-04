@@ -677,7 +677,7 @@ body {
   border-collapse: collapse;
   font-family: system-ui, -apple-system, sans-serif;
   font-size: 13px;
-  table-layout: fixed; /* Ensures table stays within container width */
+  table-layout: fixed;
 }
 
 .logs-table th,
@@ -694,20 +694,36 @@ body {
 
 /* Metadata Row (Row 1) */
 .log-meta-row td {
-  border-bottom: 1px dashed #e0e0e0;
-  background-color: #fcfcfc;
+  border-bottom: 1px dashed #d0d0d0;
   font-weight: 500;
 }
 
 /* Message Row (Row 2) */
 .log-message-row td {
   border-top: none;
-  border-bottom: 2px solid #888; /* Stronger divider between distinct log entries */
-  word-break: break-all; /* Wraps long UUIDs/hashes so they don't force horizontal scroll */
-  background-color: #ffffff;
+  border-bottom: 2px solid #888; /* Strong divider between log entries */
+  word-break: break-all;
   font-family: monospace, monospace;
   color: #222;
   padding-left: 12px;
+}
+
+/* --- Level-Based Color Coding --- */
+
+/* Standard / Info entries */
+.log-level-info.log-meta-row td {
+  background-color: #f8fafc;
+}
+.log-level-info.log-message-row td {
+  background-color: #ffffff;
+}
+
+/* Warning & Error: Subtle pastel red highlight across both rows */
+.log-level-warning.log-meta-row td,
+.log-level-warning.log-message-row td,
+.log-level-error.log-meta-row td,
+.log-level-error.log-message-row td {
+  background-color: #fde8e8; /* Soft pastel red */
 }
 
 /* ~~~ General text styles ~~~ */

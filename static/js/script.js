@@ -786,7 +786,6 @@ function getSelectedResolution(selectName) {
 }
 
 function convertLogDataToHTMLTable(log_data) {
-    // Columns for the top row (Row 1)
     const top_row_columns = [
         { key: 'Datestamp', col_num: 1 },
         { key: 'Username', col_num: 4 },
@@ -794,13 +793,14 @@ function convertLogDataToHTMLTable(log_data) {
         { key: 'Level', col_num: 2 }
     ];
     
-    const message_col_num = 7; // Message index
+    const level_col_num = 2;
+    const message_col_num = 7;
 
     const table = document.createElement('table');
     table.id = 'logs-table';
     table.className = 'logs-table';
 
-    // Header Row (Top Row Metadata Headings)
+    // Header Row
     const thead = table.createTHead();
     const headerRow = thead.insertRow();
     top_row_columns.forEach(column => {
@@ -812,18 +812,22 @@ function convertLogDataToHTMLTable(log_data) {
     const tbody = table.createTBody();
 
     log_data.forEach(log_line => {
-        // Row 1: Datestamp, Username, IP, Level
+        // Normalize the level text for class naming (e.g., 'warning', 'error', 'info')
+        const rawLevel = String(log_line[level_col_num] || '').toLowerCase().trim();
+        const levelClass = `log-level-${rawLevel}`;
+
+        // Row 1: Metadata (Datestamp, Username, IP, Level)
         const metaRow = tbody.insertRow();
-        metaRow.className = 'log-meta-row';
+        metaRow.className = `log-meta-row ${levelClass}`;
 
         top_row_columns.forEach(column => {
             const cell = metaRow.insertCell();
             cell.textContent = log_line[column.col_num] ?? '';
         });
 
-        // Row 2: Message (Spans across all 4 columns)
+        // Row 2: Message
         const messageRow = tbody.insertRow();
-        messageRow.className = 'log-message-row';
+        messageRow.className = `log-message-row ${levelClass}`;
 
         const messageCell = messageRow.insertCell();
         messageCell.colSpan = top_row_columns.length;
