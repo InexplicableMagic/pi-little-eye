@@ -41,13 +41,7 @@
     </div>
     
     <div id="configuration-window">
-    
         <div id="panel-selector">
-            <div id="close-config-button-container">
-                <button id="close-config-button">
-                    <img class="close-button-icon-image" src="static/icons/Faenza-edit-delete-symbolic.svg" alt="Close options panel">
-                </button>
-            </div>
             <div id="panel-buttons">
                 <button class="config-panel-selector-button" onclick="switchConfigPanel('user')">
                     <img class="config-panel-icon-image" src="static/icons/Faenza-emblem-people.svg" alt="Display user account settings panel">
@@ -60,6 +54,9 @@
                 </button>
                 <button id="config-panel-selector-button" class="config-panel-selector-button" onclick="switchConfigPanel('logs')">
                     <img class="config-panel-icon-image" src="static/icons/Faenza-document-properties.svg" alt="Display camera logs">
+                </button>
+                <button id="close-config-button">
+                        <img class="close-button-icon-image" src="static/icons/Faenza-edit-delete-symbolic.svg" alt="Close options panel">
                 </button>
             </div>
         </div>
@@ -88,9 +85,7 @@
                   <div class="config-section-header">
                     <span class="section-title">Manage Application Keys</span>
                     <div class="vertical-list">
-                        <button id="generate-app-key-button" class="btn-primary" onclick="generate_appkey()">
-                            <span>+</span> New App Key
-                        </button>
+                        <button id="generate-app-key-button" class="btn-primary" onclick="generate_appkey()">New App Key</button>
                     </div>
                   </div>
 

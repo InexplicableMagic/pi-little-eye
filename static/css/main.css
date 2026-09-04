@@ -37,6 +37,29 @@ body {
     margin: 5px;
 }
 
+
+#panel-buttons {
+    position: relative; /* Anchors the close button inside this container */
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+#close-config-button {
+    position: absolute;
+    right: 10px;         /* Pins it 10px from the right edge */
+    top: 50%;
+    transform: translateY(-50%); /* Centers it vertically */
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+}
+
+
+
 .section-title {
     display: inline-block;
     margin-bottom: 10px;
