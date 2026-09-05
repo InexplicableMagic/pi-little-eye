@@ -15,9 +15,6 @@ const manageLogsURL = '/api/v1/log-management';
 
 const userTableID = 'user-table'
 
-let lastValidIPAllowList='';
-let lastValidIPBlockList='';
-
 //TODO: Check cookies are enabled and message the user if not
 function verifyCookiesEnabled() {
     if (navigator.cookieEnabled) return true;
@@ -286,12 +283,11 @@ function resetConfigOnUI(){
 
                 const ipStringAllowlist = config.security.allowed_ips.allowlist.join('\n');
                 const ipStringBlocklist = config.security.allowed_ips.blocklist.join('\n');
-                
-                lastValidIPAllowList = ipStringAllowlist;
-                lastValidIPBlockList = ipStringBlocklist;
+                const sanList = config.security.san_names.join('\n');
                 
                 const ipAllowlistTextArea = document.getElementById('allowed-ip-list');
                 const ipBlocklistTextArea = document.getElementById('blocked-ip-list');
+                const sanListTextArea = document.getElementById('set-san-list')
                 
                 ipAllowlistTextArea.value = ipStringAllowlist;
                 if(config.security.enforce_ip_allowlist === true){
@@ -303,6 +299,8 @@ function resetConfigOnUI(){
                 document.getElementById('enable-blocklist-checkbox').checked = config.security.enforce_ip_blocklist
                 
                 ipBlocklistTextArea.value = ipStringBlocklist;
+
+                sanListTextArea.value = sanList;
 
                 const timestampPositionSelect = document.getElementById('timestamp-position-select');
                 timestampPositionSelect.value = config.camera.timestamp_position;
@@ -347,23 +345,19 @@ function convertStringListToArray( text ){
     return text.split(/\r?\n/).map(item => item.trim()).filter(item => item !== '');
 }
 
-function validationFeedbackIPTextArea(textArea) {
-  const isValid = validateIPArray(convertStringListToArray( textArea.value ));
-  const saveIPConfigButton = document.getElementById('save-ip-config-button');
-  if (!isValid) {
-    textArea.style.border = '4px solid red';
-    saveIPConfigButton.disabled = true;
-  } else {
-    textArea.style.border = ''; // Reset to default
-    saveIPConfigButton.disabled = false;
-  }  
-}
-
-function setupTextAreaValidation(textAreaId) {
+function validationFeedbackIPTextArea(textAreaId) {
   const textArea = document.getElementById(textAreaId);
+  let debounceTimeout;
   
   textArea.addEventListener('input', function() {
-    validationFeedbackIPTextArea(this);
+    clearTimeout( debounceTimeout )
+    
+    if (!validateIPArray(convertStringListToArray(textArea.value))) {
+        textArea.style.border = '4px solid red';
+    } else {
+        textArea.style.border = ''; // Reset to default
+        debounceTimeout = setTimeout(() => { saveConfig("security"); }, 500);
+    }  
   });
 }
 
@@ -376,6 +370,16 @@ function validateNumberInputAreaInRange( inputArea, min, max ) {
         inputArea.style.border = '4px solid red';
         return false;
     }
+}
+
+function sanValidation(textAreaId) {
+    const textArea = document.getElementById(textAreaId);
+    let debounceTimeout;
+
+    textArea.addEventListener('input', function() {
+        clearTimeout(debounceTimeout);
+        debounceTimeout = setTimeout(() => { saveConfig("security"); }, 500);
+    })
 }
 
 function setupInputAreaNumberValidation( inputAreaId, min, max, doSaveConfig, panel=null ){
@@ -410,29 +414,31 @@ function convertConfigUIStateToJSON(panel = null){
     if( panel === null || panel === "security" ){
         const ipAllowlistTextArea = document.getElementById('allowed-ip-list');
         const ipBlocklistTextArea = document.getElementById('blocked-ip-list');
+        const sanListTextArea = document.getElementById('set-san-list');
 
         enforce_blocklist_ips = document.getElementById('enable-blocklist-checkbox').checked
+        enforce_allowlist_ips = document.getElementById('allowed-ips-radio').checked
 
-        allowed_ip_listing_array = convertStringListToArray( lastValidIPAllowList )
-        blocked_ip_listing_array = convertStringListToArray( lastValidIPBlockList )
+        allowed_ip_listing_array = convertStringListToArray( ipAllowlistTextArea.value )
+        blocked_ip_listing_array = convertStringListToArray( ipBlocklistTextArea.value )
 
-        if( validateIPArray( allowed_ip_listing_array ) && validateIPArray( blocked_ip_listing_array ) ){
-            enforce_allowlisted_ips = true
-            if(document.getElementById('any-ip-radio').checked)
-                enforce_allowlisted_ips = false
+        postObject.security = { allowed_ips: {} }
 
-            postObject.security = {
-               allowed_ips: {
-                allowlist: allowed_ip_listing_array,
-                blocklist: blocked_ip_listing_array
-               },
-               enforce_ip_allowlist: enforce_allowlisted_ips,
-               enforce_ip_blocklist: enforce_blocklist_ips,   
-            }
+        if( validateIPArray( allowed_ip_listing_array ) ){
+            postObject.security.allowed_ips.allowlist = allowed_ip_listing_array;
+        } 
 
-        }else{
-            console.log("Invalid IP array")
+        if( validateIPArray( blocked_ip_listing_array ) ){
+            postObject.security.allowed_ips.blocklist = blocked_ip_listing_array;
         }
+
+        postObject.security.enforce_ip_blocklist = enforce_blocklist_ips;
+        postObject.security.enforce_ip_allowlist = enforce_allowlist_ips;
+
+        san_list_array = convertStringListToArray( sanListTextArea.value );
+        postObject.security.san_names = san_list_array;
+
+
     }
 
     if( panel === null || panel === "camera" ){
@@ -989,9 +995,10 @@ function addEventListeners() {
     });
     
     document.addEventListener('DOMContentLoaded', function() {
-        setupTextAreaValidation('allowed-ip-list');
-        setupTextAreaValidation('blocked-ip-list');
-        setupInputAreaNumberValidation( 'max-wifi-bandwidth', 0.1, 100000, true, "camera" )
+        validationFeedbackIPTextArea('allowed-ip-list');
+        validationFeedbackIPTextArea('blocked-ip-list');
+        setupInputAreaNumberValidation( 'max-wifi-bandwidth', 0.1, 100000, true, "camera" );
+        sanValidation( 'set-san-list' );
     });
    
     // Restart the video if the page becomes visible after previously being hidden
@@ -1047,18 +1054,6 @@ function restartVideoFeed() {
     };
     
     videoContainer.appendChild(img);
-}
-
-
-
-function saveIPChangesConfig(){
-    const allowedIPTextArea = document.getElementById('allowed-ip-list')
-    const blockedIPTextArea = document.getElementById('blocked-ip-list')
-    
-    lastValidIPAllowList = allowedIPTextArea.value;
-    lastValidIPBlockList = blockedIPTextArea.value;
-    
-    saveConfig("security");    
 }
 
 // Determine if the user is authenticated - used to choose which window to display

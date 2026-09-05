@@ -186,29 +186,30 @@
             <div id="ip-block-section" class="configuration-section" >
                 <div class="vertical-list">
                     <div class="side-by-side">
-                        <input type="radio" id="any-ip-radio" name="ips-allowed" value="any-ip" checked>
+                        <input type="radio" id="any-ip-radio" name="ips-allowed" value="any-ip" checked onchange="saveConfig('security');">
                         <label for="any-ip-radio">Any IP may access camera (except blocked)</label>
                     </div>
                     <div class="side-by-side">
-                        <input type="radio" id="allowed-ips-radio" name="ips-allowed" value="allowed-ips">
+                        <input type="radio" id="allowed-ips-radio" name="ips-allowed" value="allowed-ips" onchange="saveConfig('security');">
                         <label for="allowed-ips-radio">Only below IP ranges may access camera</label>
                     </div>
                     <label for="allowed-ip-list">Below IP ranges may access camera:</label>
                     <textarea id="allowed-ip-list" name="allowed-ip-list" placeholder="192.168.*" rows="6" cols="25"></textarea>
                     
                     <div class="side-by-side">
-                        <input type="checkbox" id="enable-blocklist-checkbox">
+                        <input type="checkbox" id="enable-blocklist-checkbox" onchange="saveConfig('security');">
                         <label for="enable-blocklist-checkbox">Enable IP block list</label>
                     </div>
                     <label for="blocked-ip-list">Below IP ranges are blocked:</label>
                     <textarea id="blocked-ip-list" name="blocked-ip-list" placeholder="1.1.1.*" rows="6" cols="25"></textarea>
-                    <button onclick="saveIPChangesConfig();" id="save-ip-config-button">Save Changes</button>
                 </div>
             </div>
             <div id="ca-download-section" class="configuration-section" >
                 <div class="vertical-list">
-                    <label for="blocked-ip-list">Download Certificate Authority:</label>
-                    <button type="button" onclick="window.location.href='/download/ca-certificate'">
+                    <label for="set-san-list">Certificate Subject Alt Names:</label>
+                    <textarea id="set-san-list" name="set-san-list" rows="3" cols="25"></textarea>
+                    <label for="download-ca-button">Download Certificate Authority:</label>
+                    <button id="download-ca-button" type="button" onclick="window.location.href='/download/ca-certificate'">
                         Download CA
                     </button>
                 </div>

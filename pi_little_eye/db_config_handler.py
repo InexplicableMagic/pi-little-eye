@@ -1190,7 +1190,8 @@ class DBConfigHandler:
                         'security': {
                             'allowed_ips': list_of_allowed_ips,
                             'enforce_ip_allowlist': self.get_parameter_value('enforce_ip_allowlist'),
-                            'enforce_ip_blocklist': self.get_parameter_value('enforce_ip_blocklist')
+                            'enforce_ip_blocklist': self.get_parameter_value('enforce_ip_blocklist'),
+                            'san_names': self.get_all_san_names()
                         },
                         'users': {
                             'usernames' : self.list_all_usernames(),
@@ -1311,6 +1312,8 @@ class DBConfigHandler:
                     if 'enforce_ip_blocklist' in security_panel:
                         self.insert_or_update_parameter( 'enforce_ip_blocklist', 'bool', security_panel['enforce_ip_blocklist'] )
                         self.enforce_ip_blocklist = security_panel['enforce_ip_blocklist']
+                    if 'san_names' in security_panel:
+                        self.save_all_san_names( security_panel['san_names'] )
 
                 if 'camera' in config_object:
                     camera_panel = config_object['camera']
@@ -1486,7 +1489,7 @@ class DBConfigHandler:
                     if conn:
                         conn.close()
 
-            return False                 
+            return False              
             
             
 
