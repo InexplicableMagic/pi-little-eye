@@ -206,9 +206,9 @@ function setPass(username, password, accountType, challenge, orignalPassword = n
 }
 
 function logout( whichUser = null ){
-    data = {}
+    data = { 'csrf_token': csrfToken }
     if(whichUser != null ){
-        data = { 'username': whichUser }
+        data.username = whichUser
     }
     return fetch( logoutURL, {
         method: 'POST',

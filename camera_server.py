@@ -270,37 +270,41 @@ def test_auth_state():
 @nocache
 def logout():
     response = make_response( jsonify(  { 'error': True, 'message': 'unknown error' } ), 500 )
-    
-    (authenticated, message, http_code, this_user_username) = is_cookie_authenticated( )
-    if not authenticated:
-        return make_response( jsonify ( { 'error': True, 'message': message } ), http_code )
-    else:
-        logout_this_user = True    
-        post_data = request.get_json(silent=True)
-        if post_data:
-            user_to_logout = post_data.get('username', None)
-            if user_to_logout is not None:
-                user_to_logout = user_to_logout.lower()
-                if user_to_logout != this_user_username:
-                    current_user_permissions = dbch.get_user_permissions( this_user_username )
-                    if current_user_permissions == 'admin':
-                        dbch.remove_all_user_sessions( user_to_logout )
-                        ch.logout_user( user_to_logout )
-                        logout_this_user = False
-                        log_entry( 'info', 'logout', f"Admin logged out user \"{user_to_logout}\"", username=this_user_username )
-                        response = make_response( jsonify(  { 'error': False, 'message': 'User logged out' } ), 200 )
-                    else:
-                        response = make_response( jsonify(  { 'error': True, 'message': 'Not authorised to logout other users' } ), 403 )
-                        
-        if logout_this_user:
-            dbch.remove_all_user_sessions( this_user_username )
-            ch.logout_user( this_user_username )
-            log_entry( 'info', 'logout', f"Logged out", username=this_user_username )
-            response = make_response( jsonify (  { 'error': False, 'message': 'logged out' } ), 200 )
-            response.delete_cookie('session_id')
-            response.delete_cookie('auth_token')
-            return response
-        
+    post_data = request.get_json(silent=True)
+    if post_data:
+        csrf_in_cookie = request.cookies.get('csrf_token')
+        if verify_csrf( post_data, csrf_in_cookie ):  
+            (authenticated, message, http_code, this_user_username) = is_cookie_authenticated( )
+            if not authenticated:
+                return make_response( jsonify ( { 'error': True, 'message': message } ), http_code )
+            else:
+                logout_this_user = True    
+                user_to_logout = post_data.get('username', None)
+                if user_to_logout is not None:
+                    user_to_logout = user_to_logout.lower()
+                    if user_to_logout != this_user_username:
+                        current_user_permissions = dbch.get_user_permissions( this_user_username )
+                        if current_user_permissions == 'admin':             
+                            dbch.remove_all_user_sessions( user_to_logout )
+                            ch.logout_user( user_to_logout )
+                            logout_this_user = False
+                            log_entry( 'info', 'logout', f"Admin logged out user \"{user_to_logout}\"", username=this_user_username )
+                            response = make_response( jsonify(  { 'error': False, 'message': 'User logged out' } ), 200 )
+                        else:
+                            response = make_response( jsonify(  { 'error': True, 'message': 'Not authorised to logout other users' } ), 403 )
+                                
+                if logout_this_user:
+                    dbch.remove_all_user_sessions( this_user_username )
+                    ch.logout_user( this_user_username )
+                    log_entry( 'info', 'logout', f"Logged out", username=this_user_username )
+                    response = make_response( jsonify (  { 'error': False, 'message': 'logged out' } ), 200 )
+                    response.delete_cookie('session_id')
+                    response.delete_cookie('auth_token')
+                    return response
+        else:
+            log_entry( 'warning', 'csrf', f"Anti cross-site script check failure on trying to logout. Might be a browser cookie problem but could indicate a possible malicious link click.", alert=True )   
+            response = make_response( jsonify(  { 'error': True, 'message': 'Not authorised to logout' } ), 403 )
+
     return response 
 
 @app.route('/api/v1/get-config' )
