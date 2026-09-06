@@ -43,6 +43,57 @@ def limit_content_length(f):
         return f(*args, **kwargs)
     return wrapper_function
 
+from functools import wraps
+
+def verify_csrf( post_data, csrf_in_cookie ):
+    if post_data:
+        csrf_in_post = post_data.get('csrf_token', None)
+        if csrf_in_post:
+            if csrf_in_cookie:
+                if DBConfigHandler.is_uuid_valid( csrf_in_cookie ) and DBConfigHandler.is_uuid_valid( csrf_in_post ):
+                    if secrets.compare_digest( csrf_in_cookie,  csrf_in_post ):
+                        return True
+    return False
+
+# Do anti CSRF check, require the user to be logged in and also must be admin
+def require_admin_csrf(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        action = func.__name__.replace('_', ' ')
+
+        post_data = request.get_json(silent=True)
+        if not post_data:
+            return make_response(
+                jsonify({'error': True, 'message': 'unknown error', 'err_type': 'other'}), 500
+            )
+
+        csrf_in_cookie = request.cookies.get('csrf_token')
+        if not verify_csrf( post_data, csrf_in_cookie ):
+            log_entry('warning', 'csrf',
+                      f"Anti cross-site script check failure on trying to {action}. "
+                      f"Might be a browser cookie problem but could indicate a possible malicious link click.",
+                      alert=True)
+            return make_response(jsonify({
+                'error': True,
+                'message': 'CSRF parameter or cookie problem on this action. Try refreshing page.',
+                'err_type': 'csrf_problem'
+            }), 400)
+
+        authenticated, message, http_code, username_authenticated = is_cookie_authenticated()
+        if not authenticated:
+            # Shouldn't be able to perform this action unless already logged in
+            log_entry('warning', 'admin',
+                      f"Unexpected authentication failure when attempting to {action}", alert=True)
+            return make_response(jsonify({'error': True, 'message': message, 'err_type': 'auth_failure'}), http_code)
+
+        if dbch.get_user_permissions(username_authenticated) != 'admin':
+            log_entry('warning', 'admin', f"Attempted to {action} when not admin", username=username_authenticated, alert=True)
+            return make_response(jsonify({'error': True, 'message': f'Only admin account can {action}','err_type': 'needs_admin'}), 403)
+
+        return func(post_data=post_data, username=username_authenticated, *args, **kwargs)
+    return wrapper
+
+
 class SSLErrorFilter(logging.Filter):
     """
     Suppress exceptions being printed to the terminal due to using self-signed certificate usage.
@@ -272,40 +323,23 @@ def get_config():
         
     return response
     
-@app.route('/api/v1/set-config', methods=['POST'] )
+@app.route('/api/v1/set-config', methods=['POST'])
 @limit_content_length
 @nocache
-def set_config():
-    response = make_response( jsonify(  { 'error': True, 'message': 'unknown error' } ), 500 )
-    (authenticated, message, http_code, username) = is_cookie_authenticated( )
-    
-    if not authenticated:
-        return make_response( jsonify ( { 'error': True, 'message': message } ), http_code )
-    else:
-        post_data = request.get_json(silent=True)
-        if post_data:
-            csrf_in_post = post_data.get('csrf_token', None)
-            csrf_in_cookie = request.cookies.get('csrf_token')
-            if DBConfigHandler.is_uuid_valid( csrf_in_cookie ) and DBConfigHandler.is_uuid_valid( csrf_in_post ) and secrets.compare_digest( csrf_in_cookie,  csrf_in_post ):
-                current_user_permissions = dbch.get_user_permissions( username )
-                if current_user_permissions is not None and current_user_permissions == 'admin':
-                    if DBConfigHandler.validate_config_object( post_data ):
-                        # Set options to be stored in the config - config must be validated
-                        dbch.set_config( post_data )
-                        # Set options that change the camera state
-                        if 'camera' in post_data:
-                            ch.change_camera_config( post_data['camera'] )
-                        log_entry( 'info', 'config_change', "Modified configuration", alert=False, username=username )
-                        response = make_response( jsonify ( { 'error': False, 'message': 'Config set' } ), 200 )
-                    else:
-                        response = make_response( jsonify ( { 'error': True, 'message': 'Config validation error' } ), 400 )
-                else:
-                    response = make_response( jsonify ( { 'error': True, 'message': 'Only admin user can set the config' } ), 403 )
-            else:
-                log_entry( 'warning', 'csrf', f"Anti cross-site script check failure when setting config. Might be a browser cookie problem but could indicate a possible malicious link click.", alert=True )
-                response = make_response( jsonify ( { 'error': True, 'message': 'CSRF problem', 'err_type': 'csrf_problem' } ), 400 )
-    
-    return response
+@require_admin_csrf
+def set_config(post_data, username):
+    if not DBConfigHandler.validate_config_object(post_data):
+        return make_response(jsonify({'error': True, 'message': 'Config validation error'}), 400)
+
+    # Set options to be stored in the config - config must be validated
+    dbch.set_config(post_data)
+
+    # Set options that change the camera state
+    if 'camera' in post_data:
+        ch.change_camera_config(post_data['camera'])
+
+    log_entry('info', 'config_change', "Modified configuration", alert=False, username=username)
+    return make_response(jsonify({'error': False, 'message': 'Config set'}), 200)
 
 @app.route('/api/v1/get-logs', methods=['GET'])
 @nocache
@@ -339,91 +373,79 @@ def get_logs():
         
     return response
 
+# Manage server logs
 @app.route('/api/v1/log-management', methods=['POST'])
 @limit_content_length
-@nocache  
-def log_management():
-    response = make_response( jsonify(  { 'error': True, 'message': 'unknown error' } ), 500 )
-    (authenticated, message, http_code, username) = is_cookie_authenticated( )
-    if not authenticated:
-        response =  make_response( jsonify ( { 'error': True, 'message': message } ), http_code )
-    else:
-        current_user_permissions = dbch.get_user_permissions( username )
-        if current_user_permissions == 'admin':
-            post_data = request.get_json(silent=True)
-            if post_data:
-                csrf_in_post = post_data.get('csrf_token', None)
-                csrf_in_cookie = request.cookies.get('csrf_token')
-                if DBConfigHandler.is_uuid_valid( csrf_in_cookie ) and DBConfigHandler.is_uuid_valid( csrf_in_post ) and secrets.compare_digest( csrf_in_cookie, csrf_in_post ):
-                    if 'full_clear' in post_data and post_data['full_clear']:
-                        dbch.delete_old_log_lines( full_clear = True )
-                        log_entry( 'info', 'logs_cleared', f"Cleared logs", username=username )
-                        response = make_response( jsonify ( { 'error': False, 'message': 'Logs cleared' } ), 200 )
-                else:
-                    response = make_response( jsonify ( { 'error': True, 'message': 'CSRF parameter or cookie problem. Try refreshing page.', 'err_type': 'csrf_problem' } ), 400 )
-                    log_entry( 'warning', 'csrf', f"Anti cross-site script check failure when managing logs. Might be a browser cookie problem but could indicate a possible malicious link click.", alert=True )       
-        else:
-            response = make_response( jsonify ( { 'error': True, 'message': 'Only admin user can manage the logs' } ), 403 )
-        
-    return response
+@nocache
+@require_admin_csrf
+def log_management(post_data, username):
+    if post_data.get('full_clear'):
+        dbch.delete_old_log_lines(full_clear=True)
+        log_entry('info', 'logs_cleared', "Cleared logs", username=username)
+        return make_response(jsonify({'error': False, 'message': 'Logs cleared'}), 200)
+
+    return make_response(jsonify({
+        'error': True,
+        'message': "No valid log management action specified. Set 'full_clear': true to clear logs.",
+        'err_type': 'bad_action'
+    }), 400)
+
 
 # Lock/unlock or delete a user account
-@app.route('/api/v1/account-management', methods=['POST'] )
+@app.route('/api/v1/account-management', methods=['POST'])
 @limit_content_length
 @nocache
-def account_management():
-    response = make_response( jsonify(  { 'error': True, 'message': 'unknown error' } ), 500 )
-    (authenticated, message, http_code, username_authenticated) = is_cookie_authenticated( )
-    
-    if not authenticated:
-        return make_response( jsonify ( { 'error': True, 'message': message } ), http_code )
+@require_admin_csrf
+def account_management(post_data, username):
+    if not dbch.test_user_exists(username):
+        # Shouldn't happen for an authenticated admin, but guard anyway
+        log_entry('warning', 'admin', "Authenticated user missing from DB during account management",
+                   alert=True, username=username)
+        return make_response(jsonify({'error': True, 'message': 'unknown error'}), 500)
+
+    username_postdata = post_data.get('username', None)
+    action = post_data.get('action', None)
+
+    if not (username_postdata and action):
+        return make_response(jsonify({
+            'error': True, 'message': 'Username missing in post data', 'err_type': 'username_missing'
+        }), 400)
+
+    if not dbch.test_user_exists(username_postdata):
+        log_entry('warning', 'admin', "Attempted to perform account management on non-existent account",
+                   alert=True, username=username)
+        return make_response(jsonify({
+            'error': True, 'message': 'username doesnt exist', 'err_type': 'user_not_exists'
+        }), 400)
+
+    if username.lower() == username_postdata.lower():
+        return make_response(jsonify({
+            'error': True, 'message': "Cant lock/unlock or delete own account.", 'err_type': 'username_missing'
+        }), 403)
+
+    if action == 'lock':
+        dbch.lock_unlock_delete_account(username_postdata, 'lock')
+        dbch.remove_all_user_sessions(username_postdata)
+        ch.logout_user(username_postdata)
+        log_entry('info', 'account_locked', f'Account "{username_postdata}" locked', username=username)
+        return make_response(jsonify({'error': False, 'message': 'Account locked'}), 200)
+
+    elif action == 'unlock':
+        dbch.lock_unlock_delete_account(username_postdata, 'unlock')
+        log_entry('info', 'account_unlocked', f'Account "{username_postdata}" unlocked', username=username)
+        return make_response(jsonify({'error': False, 'message': 'Account unlocked'}), 200)
+
+    elif action == 'delete':
+        dbch.lock_unlock_delete_account(username_postdata, 'delete')
+        dbch.remove_all_user_sessions(username_postdata)
+        ch.logout_user(username_postdata)
+        log_entry('info', 'account_deleted', f'Account "{username_postdata}" deleted', username=username)
+        return make_response(jsonify({'error': False, 'message': 'Account deleted'}), 200)
+
     else:
-        post_data = request.get_json(silent=True)
-        if post_data:
-            csrf_in_post = post_data.get('csrf_token', None)
-            csrf_in_cookie = request.cookies.get('csrf_token')
-            if DBConfigHandler.is_uuid_valid( csrf_in_cookie ) and DBConfigHandler.is_uuid_valid( csrf_in_post ) and secrets.compare_digest( csrf_in_cookie, csrf_in_post ):
-                if dbch.test_user_exists( username_authenticated ): 
-                    current_user_permissions = dbch.get_user_permissions( username_authenticated )
-                    if current_user_permissions is not None and current_user_permissions == 'admin':
-                        username_postdata = post_data.get('username', None)
-                        action = post_data.get('action', None)
-                        if username_postdata and action:                  
-                            if dbch.test_user_exists( username_postdata ):
-                                if username_authenticated.lower() != username_postdata.lower():
-                                    if action == 'lock':
-                                        dbch.lock_unlock_delete_account( username_postdata, 'lock' )
-                                        dbch.remove_all_user_sessions( username_postdata )
-                                        ch.logout_user( username_postdata )
-                                        log_entry( 'info', 'account_locked', f"Account \"{username_postdata}\" locked", username=username_authenticated )
-                                        response = make_response( jsonify ( { 'error': False, 'message': 'Account locked' } ), 200 )
-                                    elif action == 'unlock':
-                                        dbch.lock_unlock_delete_account( username_postdata, 'unlock' )
-                                        log_entry( 'info', 'account_unlocked', f"Account \"{username_postdata}\" unlocked", username=username_authenticated )
-                                        response = make_response( jsonify ( { 'error': False, 'message': 'Account unlocked' } ), 200 )
-                                    elif action == 'delete':
-                                        dbch.lock_unlock_delete_account( username_postdata, 'delete' )
-                                        dbch.remove_all_user_sessions( username_postdata )
-                                        ch.logout_user( username_postdata )
-                                        log_entry( 'info', 'account_deleted', f"Account \"{username_postdata}\" deleted", username=username_authenticated )
-                                        response = make_response( jsonify ( { 'error': False, 'message': 'Account deleted' } ), 200 )
-                                    else:
-                                        response = make_response( jsonify ( { 'error': True, 'message': 'Incorrect action. Must be unlock,lock or delete', 'err_type': 'bad_action' } ), 400 )        
-                                else:
-                                    response = make_response( jsonify ( { 'error': True, 'message': 'Cant lock/unlock or delete own account.', 'err_type': 'username_missing' } ), 403 )
-                            else:
-                                log_entry( 'warning', 'admin', f"Attempted to perform account management on non-existent account", alert=True, username=username_authenticated )
-                                response = make_response( jsonify ( { 'error': True, 'message': 'username doesnt exist', 'err_type': 'user_not_exists' } ), 400 )
-                        else:
-                            response = make_response( jsonify ( { 'error': True, 'message': 'Username missing in post data', 'err_type': 'username_missing' } ), 400 )
-                    else:
-                        log_entry( 'warning', 'admin', f"Attempted to perform account management but not an admin", alert=True, username=username_authenticated )
-                        response = make_response( jsonify ( { 'error': True, 'message': 'Only admin account can perform this operation', 'err_type': 'needs_admin' } ), 403 )
-            else:
-                response = make_response( jsonify ( { 'error': True, 'message': 'CSRF parameter or cookie problem. Try refreshing page.', 'err_type': 'csrf_problem' } ), 400 )
-                log_entry( 'warning', 'csrf', f"Anti cross-site script check failure in account management. Might be a browser cookie problem but could indicate a possible malicious link click.", alert=True )
-    
-    return response
+        return make_response(jsonify({
+            'error': True, 'message': 'Incorrect action. Must be unlock,lock or delete', 'err_type': 'bad_action'
+        }), 400)
     
 @app.route('/api/v1/get-challenge')
 @nocache
@@ -497,10 +519,8 @@ def set_pass():
             original_password = post_data.get('original_password', None)
             #The "challenge" value can be obtained from the /get_challenge method
             challenge = post_data.get('challenge', None)
-            csrf_in_post = post_data.get('csrf_token', None)
             csrf_in_cookie = request.cookies.get('csrf_token')
-            
-            if DBConfigHandler.is_uuid_valid( csrf_in_cookie ) and DBConfigHandler.is_uuid_valid( csrf_in_post ) and secrets.compare_digest( csrf_in_cookie, csrf_in_post ):
+            if verify_csrf( post_data, csrf_in_cookie ):
                 if new_password and challenge:
                     if dbch.validate_challege( challenge ):
                         # Check if the app is waiting for the initial admin password to be set
@@ -584,9 +604,8 @@ def generate_app_key():
     post_data = request.get_json(silent=True)
     if post_data:
         challenge = post_data.get('challenge', None)
-        csrf_in_post = post_data.get('csrf_token', None)
         csrf_in_cookie = request.cookies.get('csrf_token')
-        if DBConfigHandler.is_uuid_valid( csrf_in_cookie ) and DBConfigHandler.is_uuid_valid( csrf_in_post ) and secrets.compare_digest( csrf_in_cookie, csrf_in_post ):
+        if verify_csrf( post_data, csrf_in_cookie ):
             (authenticated, message, http_code, username_authenticated) = is_cookie_authenticated_with_challenge( challenge )
             if authenticated:
                 current_user_permissions = dbch.get_user_permissions( username_authenticated )
@@ -607,37 +626,25 @@ def generate_app_key():
     
     return response
 
-@app.route('/api/v1/delete-app-key', methods=['POST'] )
+@app.route('/api/v1/delete-app-key', methods=['POST'])
 @limit_content_length
 @nocache
-def delete_app_key():
-    response = make_response( jsonify( { 'error': True, 'message': 'unknown error', 'err_type': 'other' } ), 500 )
-    post_data = request.get_json(silent=True)
-    if post_data:
-        csrf_in_post = post_data.get('csrf_token', None)
-        csrf_in_cookie = request.cookies.get('csrf_token')
-        if DBConfigHandler.is_uuid_valid( csrf_in_cookie ) and DBConfigHandler.is_uuid_valid( csrf_in_post ) and secrets.compare_digest( csrf_in_cookie, csrf_in_post ):
-            (authenticated, message, http_code, username_authenticated) = is_cookie_authenticated( )
-            if authenticated:
-                current_user_permissions = dbch.get_user_permissions( username_authenticated )
-                if current_user_permissions == 'admin':
-                        app_key_to_delete = post_data.get('app_key', None)
-                        log_entry( 'info', 'appkey', f"Deleted app key {app_key_to_delete}", username=username_authenticated )
-                        ch.logout_user( app_key_to_delete )
-                        dbch.delete_app_key( app_key_to_delete )
-                        response = make_response( jsonify ( { 'error': False, 'message': 'App key deleted' } ), 200 )
-                else:
-                    log_entry( 'warning', 'admin', f"Attempted to delete an app key when not admin", username=username_authenticated, alert=True )
-                    response = make_response( jsonify ( { 'error': True, 'message': 'Only admin account can delete an app key', 'err_type': 'needs_admin' } ), 403 )
-            else:
-                # Shouldn't be able to perform this action unless already logged in
-                log_entry( 'warning', 'admin', "Unexpected authentication failure when attempting to delete app key", alert=True )
-                return make_response( jsonify ( { 'error': True, 'message': message, 'err_type': 'auth_failure' } ), http_code )
-        else:
-            log_entry( 'warning', 'csrf', f"Anti cross-site script check failure on trying to delete appkey. Might be a browser cookie problem but could indicate a possible malicious link click.", alert=True )
-            response = make_response( jsonify ( { 'error': True, 'message': 'CSRF parameter or cookie problem on deleting an app key. Try refreshing page.', 'err_type': 'csrf_problem' } ), 400 )               
+@require_admin_csrf
+def delete_app_key(post_data, username):
+    app_key_to_delete = post_data.get('app_key', None)
+    log_entry('info', 'appkey', f"Deleted app key {app_key_to_delete}", username=username)
+    ch.logout_user(app_key_to_delete)
+    dbch.delete_app_key(app_key_to_delete)
+    return make_response(jsonify({'error': False, 'message': 'App key deleted'}), 200)
 
-    return response
+@app.route('/api/v1/renew-certificate', methods=['GET'])
+@limit_content_length
+@nocache
+@require_admin_csrf
+def renew_certificate(post_data, username):
+    CertificateHandler.update_tls_certificates(dbch, regenerate_cert=True)
+    return make_response(jsonify({'error': False, 'message': 'Certificate renewal initiated'}), 200)
+
 
 #Allow download of a certificate authority that matches the self-signed certificate
 @app.route('/download/ca-certificate', methods=['GET'])
