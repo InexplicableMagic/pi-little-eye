@@ -273,6 +273,27 @@ function restGetCallNoParams(url) {
   });
 }
 
+// Enable/Disable the IP entry text area depending on if the allow/blocklists are enabled
+function setAllowBlockListDisabledState() {
+    const ipAllowlistTextArea = document.getElementById('allowed-ip-list');
+    const ipBlocklistTextArea = document.getElementById('blocked-ip-list');
+    const allowedIpsCheckedState = document.getElementById('allowed-ips-radio').checked
+    const blockListCheckedState = document.getElementById('enable-blocklist-checkbox').checked
+
+    if(allowedIpsCheckedState == true){
+        ipAllowlistTextArea.disabled = true
+    }else{
+        ipAllowlistTextArea.disabled = false
+    }
+
+    if(blockListCheckedState == true){
+        ipBlocklistTextArea.disabled = true
+    }else{
+        ipBlocklistTextArea.disabled = false
+    }
+      
+}
+
 function resetConfigOnUI(){
     getConfig()
     .then( config => {
@@ -299,6 +320,8 @@ function resetConfigOnUI(){
                 document.getElementById('enable-blocklist-checkbox').checked = config.security.enforce_ip_blocklist
                 
                 ipBlocklistTextArea.value = ipStringBlocklist;
+
+                setAllowBlockListDisabledState()
 
                 sanListTextArea.value = sanList;
 
@@ -438,7 +461,8 @@ function convertConfigUIStateToJSON(panel = null){
         san_list_array = convertStringListToArray( sanListTextArea.value );
         postObject.security.san_names = san_list_array;
 
-
+        //Enabled/disable data entry into the text area depending on radio/checkbox settings
+        setAllowBlockListDisabledState()
     }
 
     if( panel === null || panel === "camera" ){
@@ -1000,7 +1024,7 @@ function addEventListeners() {
         setupInputAreaNumberValidation( 'max-wifi-bandwidth', 0.1, 100000, true, "camera" );
         sanValidation( 'set-san-list' );
     });
-   
+  
     // Restart the video if the page becomes visible after previously being hidden
     document.addEventListener('visibilitychange', function() {
             if (document.visibilityState === 'visible') {
