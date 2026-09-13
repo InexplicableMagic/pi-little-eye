@@ -368,19 +368,27 @@ function convertStringListToArray( text ){
     return text.split(/\r?\n/).map(item => item.trim()).filter(item => item !== '');
 }
 
-function validationFeedbackIPTextArea(textAreaId) {
+function validationFeedbackIPTextArea(textAreaId, disableControl=null, zeroLengthAllowed=false) {
   const textArea = document.getElementById(textAreaId);
+
   let debounceTimeout;
   
   textArea.addEventListener('input', function() {
     clearTimeout( debounceTimeout )
+    ipListArray = convertStringListToArray(textArea.value)
     
-    if (!validateIPArray(convertStringListToArray(textArea.value))) {
-        textArea.style.border = '4px solid red';
-    } else {
+    if( (ipListArray.length > 0 || zeroLengthAllowed) && validateIPArray(ipListArray) ){
         textArea.style.border = ''; // Reset to default
+        if(disableControl != null)
+            document.getElementById(disableControl).disabled = false
+
         debounceTimeout = setTimeout(() => { saveConfig("security"); }, 500);
-    }  
+    }else{
+        textArea.style.border = '4px solid red';
+        if(disableControl != null)
+            document.getElementById(disableControl).disabled = true
+    }
+
   });
 }
 
@@ -447,7 +455,7 @@ function convertConfigUIStateToJSON(panel = null){
 
         postObject.security = { allowed_ips: {} }
 
-        if( validateIPArray( allowed_ip_listing_array ) ){
+        if( validateIPArray( allowed_ip_listing_array ) && allowed_ip_listing_array.length > 0 ){
             postObject.security.allowed_ips.allowlist = allowed_ip_listing_array;
         } 
 
@@ -1019,8 +1027,8 @@ function addEventListeners() {
     });
     
     document.addEventListener('DOMContentLoaded', function() {
-        validationFeedbackIPTextArea('allowed-ip-list');
-        validationFeedbackIPTextArea('blocked-ip-list');
+        validationFeedbackIPTextArea('allowed-ip-list', disableControl='allowed-ips-radio');
+        validationFeedbackIPTextArea('blocked-ip-list', disableControl='enable-blocklist-checkbox', zeroLengthAllowed=true);
         setupInputAreaNumberValidation( 'max-wifi-bandwidth', 0.1, 100000, true, "camera" );
         sanValidation( 'set-san-list' );
     });
