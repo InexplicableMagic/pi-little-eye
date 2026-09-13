@@ -277,7 +277,7 @@ function restGetCallNoParams(url) {
 function setAllowBlockListDisabledState() {
     const ipAllowlistTextArea = document.getElementById('allowed-ip-list');
     const ipBlocklistTextArea = document.getElementById('blocked-ip-list');
-    const allowedIpsCheckedState = document.getElementById('allowed-ips-radio').checked
+    const allowedIpsCheckedState = document.getElementById('allowed-ips-checkbox').checked
     const blockListCheckedState = document.getElementById('enable-blocklist-checkbox').checked
 
     if(allowedIpsCheckedState == true){
@@ -311,12 +311,8 @@ function resetConfigOnUI(){
                 const sanListTextArea = document.getElementById('set-san-list')
                 
                 ipAllowlistTextArea.value = ipStringAllowlist;
-                if(config.security.enforce_ip_allowlist === true){
-                    document.getElementById('allowed-ips-radio').checked = true;
-                }else{
-                    document.getElementById('any-ip-radio').checked = true;
-                }
-                
+               
+                document.getElementById('allowed-ips-checkbox').checked = config.security.enforce_ip_allowlist;
                 document.getElementById('enable-blocklist-checkbox').checked = config.security.enforce_ip_blocklist
                 
                 ipBlocklistTextArea.value = ipStringBlocklist;
@@ -448,7 +444,7 @@ function convertConfigUIStateToJSON(panel = null){
         const sanListTextArea = document.getElementById('set-san-list');
 
         enforce_blocklist_ips = document.getElementById('enable-blocklist-checkbox').checked
-        enforce_allowlist_ips = document.getElementById('allowed-ips-radio').checked
+        enforce_allowlist_ips = document.getElementById('allowed-ips-checkbox').checked
 
         allowed_ip_listing_array = convertStringListToArray( ipAllowlistTextArea.value )
         blocked_ip_listing_array = convertStringListToArray( ipBlocklistTextArea.value )
@@ -1027,7 +1023,7 @@ function addEventListeners() {
     });
     
     document.addEventListener('DOMContentLoaded', function() {
-        validationFeedbackIPTextArea('allowed-ip-list', disableControl='allowed-ips-radio');
+        validationFeedbackIPTextArea('allowed-ip-list', disableControl='allowed-ips-checkbox');
         validationFeedbackIPTextArea('blocked-ip-list', disableControl='enable-blocklist-checkbox', zeroLengthAllowed=true);
         setupInputAreaNumberValidation( 'max-wifi-bandwidth', 0.1, 100000, true, "camera" );
         sanValidation( 'set-san-list' );

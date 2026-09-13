@@ -755,7 +755,7 @@ if __name__ == '__main__':
     # Option to enable access if the user has locked themselves out due to incorrect IP whitelist settings
     if args.disable_ip_lists:
         dbch.write_log_line( 'warning', True, '','', 'ip_disable', 'IP whitelist/blocklist disabled via command line' )
-        dbch.disable_ip_whitelist_and_blocklist()
+        dbch.disable_ip_allowlist_and_blocklist()
         
     # User supplies their own certificate option
     using_own_certificate = bool(args.certificate and args.key)

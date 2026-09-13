@@ -186,12 +186,8 @@
             <div id="ip-block-section" class="configuration-section" >
                 <div class="vertical-list">
                     <div class="side-by-side">
-                        <input type="radio" id="any-ip-radio" name="ips-allowed" value="any-ip" checked onchange="saveConfig('security');">
-                        <label for="any-ip-radio">Any IP may access camera (except blocked)</label>
-                    </div>
-                    <div class="side-by-side">
-                        <input type="radio" id="allowed-ips-radio" name="ips-allowed" value="allowed-ips" onchange="saveConfig('security');">
-                        <label for="allowed-ips-radio">Only below IP ranges may access camera</label>
+                        <input type="checkbox" id="allowed-ips-checkbox" onchange="saveConfig('security');">
+                        <label for="allowed-ips-checkbox">Enable IP allow list</label>
                     </div>
                     <label for="allowed-ip-list">Below IP ranges may access camera:</label>
                     <textarea id="allowed-ip-list" name="allowed-ip-list" placeholder="192.168.*" rows="6" cols="25"></textarea>
