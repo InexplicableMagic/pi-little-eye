@@ -764,12 +764,18 @@ if __name__ == '__main__':
         keyfile = args.key
         certfile = args.certificate
     else:
-        # Generate a self-sign TLS certificate by default so the user doesn't have to supply one
-        CertificateHandler.update_tls_certificates( dbch )
         # If the user wants to add an additional name to the certificate SAN, then add it and exit
         if args.additional_cert_name:
             CertificateHandler.add_dns_name_to_certificate(dbch, args.additional_cert_name)
             sys.exit(0)
+
+        # If the user set a parameter on the UI requesting recreation of the certificate then do so
+        force_recreate_certificate = dbch.get_parameter_value('recreate_certificate')
+        # Generate a self-sign TLS certificate by default so the user doesn't have to supply one
+        CertificateHandler.update_tls_certificates( dbch, regenerate_cert = force_recreate_certificate )
+        if force_recreate_certificate:
+            dbch.insert_or_update_parameter( 'recreate_certificate', 'bool', False )
+
         keyfile = CertificateHandler.get_key_file_path()
         certfile = CertificateHandler.get_cert_file_path()
             

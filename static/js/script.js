@@ -313,13 +313,15 @@ function resetConfigOnUI(){
                 ipAllowlistTextArea.value = ipStringAllowlist;
                
                 document.getElementById('allowed-ips-checkbox').checked = config.security.enforce_ip_allowlist;
-                document.getElementById('enable-blocklist-checkbox').checked = config.security.enforce_ip_blocklist
+                document.getElementById('enable-blocklist-checkbox').checked = config.security.enforce_ip_blocklist;
                 
                 ipBlocklistTextArea.value = ipStringBlocklist;
 
-                setAllowBlockListDisabledState()
+                setAllowBlockListDisabledState();
 
                 sanListTextArea.value = sanList;
+
+                document.getElementById('recreate-certificate-checkbox').checked = config.security.recreate_certificate;
 
                 const timestampPositionSelect = document.getElementById('timestamp-position-select');
                 timestampPositionSelect.value = config.camera.timestamp_position;
@@ -404,9 +406,18 @@ function sanValidation(textAreaId) {
     let debounceTimeout;
 
     textArea.addEventListener('input', function() {
-        clearTimeout(debounceTimeout);
-        debounceTimeout = setTimeout(() => { saveConfig("security"); }, 500);
-    })
+        clearTimeout( debounceTimeout )
+
+        if(textArea.value.length > 0){
+            textArea.style.border = '';
+            textArea.addEventListener('input', function() {
+                clearTimeout(debounceTimeout);
+                debounceTimeout = setTimeout(() => { saveConfig("security"); }, 500);
+            });
+        }else{
+            textArea.style.border = '4px solid red';
+        }
+    });
 }
 
 function setupInputAreaNumberValidation( inputAreaId, min, max, doSaveConfig, panel=null ){
@@ -464,6 +475,8 @@ function convertConfigUIStateToJSON(panel = null){
 
         san_list_array = convertStringListToArray( sanListTextArea.value );
         postObject.security.san_names = san_list_array;
+
+        postObject.security.recreate_certificate = document.getElementById('recreate-certificate-checkbox').checked
 
         //Enabled/disable data entry into the text area depending on radio/checkbox settings
         setAllowBlockListDisabledState()

@@ -165,6 +165,8 @@ class DBConfigHandler:
             self.disable_ip_allowlist_and_blocklist()
             # Set the initial IP allowlist and blocklist
             self.set_ip_allow_list( [ '192.168.*', '10.*', '172.16.*', 'fc*', 'fd*', '127.0.0.1' ], [] )
+            # SAN list needs at least one name
+            self.save_all_san_names( [ 'localhost' ] )
             # Expire user login sessions initially after 30 days - forces password re-entry after this number of days
             self.insert_or_update_parameter( 'max_session_age', 'int', 30 )
             # Disable non-admin accounts after this number of bad password attempts in a row
@@ -187,6 +189,8 @@ class DBConfigHandler:
             self.insert_or_update_parameter( 'display_timestamp', 'bool', True )
             # Maximum wi-fi bandwidth to use
             self.insert_or_update_parameter( 'max_wifi_bandwidth', 'float', float(pi_hardware.get_suggested_max_wifi_bandwidth()) )
+            # Whether the certificate should be recreated at next boot
+            self.insert_or_update_parameter( 'recreate_certificate', 'bool', False )
 
         ip_lists = self.get_ip_allow_list()
         self.ip_response = dict()
@@ -1191,7 +1195,8 @@ class DBConfigHandler:
                             'allowed_ips': list_of_allowed_ips,
                             'enforce_ip_allowlist': self.get_parameter_value('enforce_ip_allowlist'),
                             'enforce_ip_blocklist': self.get_parameter_value('enforce_ip_blocklist'),
-                            'san_names': self.get_all_san_names()
+                            'san_names': self.get_all_san_names(),
+                            'recreate_certificate': self.get_parameter_value('recreate_certificate')
                         },
                         'users': {
                             'usernames' : self.list_all_usernames(),
@@ -1232,7 +1237,7 @@ class DBConfigHandler:
 
             if 'security' in config_object:
                 security_panel = config_object['security']
-                if not DBConfigHandler.all_keys_present( security_panel, [ 'allowed_ips', 'enforce_ip_allowlist', 'enforce_ip_blocklist' ] ):
+                if not DBConfigHandler.all_keys_present( security_panel, [ 'allowed_ips', 'enforce_ip_allowlist', 'enforce_ip_blocklist', 'recreate_certificate' ] ):
                     return False
                 if not DBConfigHandler.all_keys_present( security_panel['allowed_ips'], [ 'allowlist', 'blocklist' ] ):
                     return False
@@ -1243,6 +1248,8 @@ class DBConfigHandler:
                 if not isinstance(security_panel['enforce_ip_allowlist'], bool):
                     return False
                 if not isinstance(security_panel['enforce_ip_blocklist'], bool):
+                    return False
+                if not isinstance(security_panel['recreate_certificate'], bool):
                     return False
 
                 normalised_allowlisted = []
@@ -1313,7 +1320,11 @@ class DBConfigHandler:
                         self.insert_or_update_parameter( 'enforce_ip_blocklist', 'bool', security_panel['enforce_ip_blocklist'] )
                         self.enforce_ip_blocklist = security_panel['enforce_ip_blocklist']
                     if 'san_names' in security_panel:
-                        self.save_all_san_names( security_panel['san_names'] )
+                        if len( security_panel['san_names'] ) > 0:
+                            self.save_all_san_names( security_panel['san_names'] )
+                    # If the self-sign certificate should be regenerated at next boot
+                    if 'recreate_certificate' in security_panel:
+                        self.insert_or_update_parameter( 'recreate_certificate', 'bool', security_panel['recreate_certificate'] )
 
                 if 'camera' in config_object:
                     camera_panel = config_object['camera']
