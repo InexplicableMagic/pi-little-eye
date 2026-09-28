@@ -334,6 +334,9 @@ function resetConfigOnUI(){
 
                 const maxWifiBandwidthEntry = document.getElementById( 'max-wifi-bandwidth' );
                 maxWifiBandwidthEntry.value = config.camera.max_wifi_bandwidth
+
+                const enableHighResCheckbox = document.getElementById( 'enable-high-res' );
+                enableHighResCheckbox.checked = config.camera.enable_high_res
                 
                 //TODO: Update for multiple camera support
                 const cam_num = 0
@@ -446,6 +449,7 @@ function convertConfigUIStateToJSON(panel = null){
     const timestampPositionSelect = document.getElementById('timestamp-position-select');
     const displayTimestampCheckbox = document.getElementById('display-timestamp');
     const maxWifiBandwidthEntry = document.getElementById( 'max-wifi-bandwidth' );
+    const enableHighResCheckbox = document.getElementById( 'enable-high-res' );
    
     const postObject = { csrf_token: csrfToken }
 
@@ -488,6 +492,7 @@ function convertConfigUIStateToJSON(panel = null){
            timestamp_position: timestampPositionSelect.value,
            display_timestamp: displayTimestampCheckbox.checked,
            max_wifi_bandwidth: Number(maxWifiBandwidthEntry.value),
+           enable_high_res: enableHighResCheckbox.checked,
            //TODO: Update for multiple cameras - fixed to one at the moment
            cameras: [
                {
@@ -793,12 +798,17 @@ function generateAppKeyListTable(data, divId = 'app-key-list-table') {
 }
 
 
-function populateSelectWithResolutions(selectName, allResolutions, currentResolution) {
+function populateSelectWithResolutions(selectName, allResolutions, currentResolution, hiResCheckbox='enable-high-res') {
     // Access the select element by its ID
     const selectElement = document.getElementById(selectName);
+    const hiResOption = document.getElementById(hiResCheckbox);
+
+    const hiResEnabled = hiResOption.checked;
 
     // Clear any existing options
     selectElement.innerHTML = '';
+
+    disabledResExisted = false;
 
     // Iterate over the list of resolutions
     allResolutions.forEach(resolution => {
@@ -808,7 +818,18 @@ function populateSelectWithResolutions(selectName, allResolutions, currentResolu
         // Set the text and value of the option element
         optionElement.textContent = `${resolution.resolution[0]} x ${resolution.resolution[1]}`;
         optionElement.value = `${resolution.resolution[0]}x${resolution.resolution[1]}`;
-        
+
+        //Grey out the resolution if the server doesn't think the current Pi model would be stable at that res
+        //User can enable the greyed out resolutions with an option if they wish to test it
+        if(resolution.disable)
+            disabledResExisted = true
+
+        if(hiResEnabled)
+            optionElement.disabled = false;
+        else { 
+            optionElement.disabled = resolution.disable;
+        }
+
         if (currentResolution && currentResolution.resolution[0] === resolution.resolution[0] && currentResolution.resolution[1] === resolution.resolution[1]) {
             optionElement.selected = true;
         }
@@ -816,6 +837,15 @@ function populateSelectWithResolutions(selectName, allResolutions, currentResolu
         // Append the option element to the select element
         selectElement.appendChild(optionElement);
     });
+
+    //If there were no disabled resolutions then remove the option
+    if( (!disabledResExisted) ){
+        hiResOption.checked = true
+        hiResOption.disabled = true
+        const label = document.querySelector('label[for='+hiResCheckbox+']');
+        hiResOption.style.display = "none"
+        label.style.display = "none"
+    }
 }
 
 function getSelectedResolution(selectName) {
@@ -1258,7 +1288,7 @@ function displayClearLogModal(){
 }
 
 // Text to be displayed on the modal dialogue and a callback when the user clicks the OK button
-function showModal(text, onOkCallback) {
+function showModal(text, onOkCallback, onCancelCallback = null) {
     const modalDialogue = document.getElementById('modal-dialogue-box');
     const okBtn = document.getElementById('modal-dialogue-ok-button');
     const cancelBtn = document.getElementById('modal-dialogue-cancel-button');
@@ -1277,7 +1307,33 @@ function showModal(text, onOkCallback) {
     
     cancelBtn.onclick = function() {
         modalDialogue.style.display = "none";
+        if (onOkCallback) {
+            onCancelCallback()
+        }
     }
+}
+
+function resolutionCheckBoxStateChange() {
+    const hiResOption = document.getElementById('enable-high-res')
+    const warning = `This Pi may not have the capability to support the highest camera resolutions and may crash.
+                    If you wish to test high resolutions, ensure you are near the camera and are able to
+                    physically reset it if required.`
+    if(hiResOption.checked){
+        showModal( warning, saveStateResolutionUnlockCallback, onCancelCallback=cancelResolutionUnlockCallback )
+    }else{
+        saveStateResolutionUnlockCallback();
+    }
+    
+}
+
+function saveStateResolutionUnlockCallback() {
+    resetConfigOnUI();
+    saveConfig('camera');
+}
+
+function cancelResolutionUnlockCallback() {
+     const hiResOption = document.getElementById('enable-high-res');
+     hiResOption.checked = false;
 }
 
 function showAppKeyDisplayArea(show) {

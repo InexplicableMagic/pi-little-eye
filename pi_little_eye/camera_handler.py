@@ -665,36 +665,41 @@ class CameraHandler:
     def append_additional_resolutions( resolution_list, aspect_ratio ):
         additional_resolutions = {
             "16:9": [
-                {'resolution': (640, 360), 'max_fps': 30},   # nHD
-                {'resolution': (854, 480), 'max_fps': 30},   # FWVGA
-                {'resolution': (960, 540), 'max_fps': 30,},  # qHD
-                {'resolution': (1280, 720), 'max_fps': 30},  # HD standard
-                {'resolution': (1920, 1080), 'max_fps': 30}, # HD full
+                {'resolution': (640, 360)},   # nHD
+                {'resolution': (854, 480)},   # FWVGA
+                {'resolution': (960, 540)},   # qHD
+                {'resolution': (1280, 720)},  # HD standard
+                {'resolution': (1920, 1080)}, # HD full
             ],
             "4:3": [
-                {'resolution': (640, 480), 'max_fps': 30},   # VGA
-                {'resolution': (800, 600), 'max_fps': 30},   # SVGA
-                {'resolution': (1024, 768), 'max_fps': 30},  # XGA
-                {'resolution': (1280, 960), 'max_fps': 30},  # SXGA
-                {'resolution': (1600, 1200), 'max_fps': 30}, # UXGA
+                {'resolution': (640, 480)},   # VGA
+                {'resolution': (800, 600)},   # SVGA
+                {'resolution': (1024, 768)},  # XGA
+                {'resolution': (1280, 960)},  # SXGA
+                {'resolution': (1600, 1200)}, # UXGA
             ],
             "16:10": [
-                {'resolution': (1024, 600), 'max_fps': 30},  # WSVGA
-                {'resolution': (1280, 800), 'max_fps': 30},  # WXGA
-                {'resolution': (1440, 900), 'max_fps': 30},  # WXGA+
-                {'resolution': (1680, 1050), 'max_fps': 30}, # WSXGA+
-                {'resolution': (1920, 1200), 'max_fps': 30}, # WUXGA
+                {'resolution': (1024, 600)},  # WSVGA
+                {'resolution': (1280, 800)},  # WXGA
+                {'resolution': (1440, 900)},  # WXGA+
+                {'resolution': (1680, 1050)}, # WSXGA+
+                {'resolution': (1920, 1200)}, # WUXGA
             ],
             "1:1": [
-                {'resolution': (640, 640), 'max_fps': 30},   # VGA Square
-                {'resolution': (800, 800), 'max_fps': 30},   # SVGA Square
-                {'resolution': (960, 960), 'max_fps': 30},   # HD Square
-                {'resolution': (1280, 1280), 'max_fps': 30}, # Megapixel Square
-                {'resolution': (1536, 1536), 'max_fps': 30}, # High-density square
+                {'resolution': (640, 640)},   # VGA Square
+                {'resolution': (800, 800)},   # SVGA Square
+                {'resolution': (960, 960)},   # HD Square
+                {'resolution': (1280, 1280)}, # Megapixel Square
+                {'resolution': (1536, 1536)}, # High-density square
             ]
         }
 
-        additional_res_list = additional_resolutions['4:3']       
+        disable_higher_resolutions = False
+        high_resolution_definition = (2000,2000)              
+        if(pi_hardware.get_pi_memory() <= 1024):
+            disable_higher_resolutions = True
+
+        additional_res_list = additional_resolutions['4:3']
 
         if aspect_ratio in additional_resolutions:
             additional_res_list = additional_resolutions[aspect_ratio]
@@ -712,6 +717,13 @@ class CameraHandler:
         for resolution in additional_res_list:
             if not CameraHandler.res_already_exists( resolution_list, resolution['resolution'] ):
                 deduplicated_resolution_list.append( resolution )
+
+        # Disable higher resolutions on the UI if the Pi may not have sufficient resources to support them
+        # Higher resolution is defined as 2K x 2K and insufficient memory is 1GB or below
+        for resolution in deduplicated_resolution_list:
+            resolution['disable'] = False
+            if resolution['resolution'][0] >= high_resolution_definition[0] or resolution['resolution'][1] >= high_resolution_definition[1]:
+                resolution['disable'] = disable_higher_resolutions
 
         return deduplicated_resolution_list
     

@@ -191,6 +191,8 @@ class DBConfigHandler:
             self.insert_or_update_parameter( 'max_wifi_bandwidth', 'float', float(pi_hardware.get_suggested_max_wifi_bandwidth()) )
             # Whether the certificate should be recreated at next boot
             self.insert_or_update_parameter( 'recreate_certificate', 'bool', False )
+            # Whether high resolutions are enabled for the camera
+            self.insert_or_update_parameter( 'enable_high_res', 'bool', False )
 
         ip_lists = self.get_ip_allow_list()
         self.ip_response = dict()
@@ -1207,7 +1209,8 @@ class DBConfigHandler:
                             'display_timestamp': self.get_parameter_value('display_timestamp'),
                             'timestamp_position': self.get_parameter_value('timestamp_position'),
                             'display_timestamp': self.get_parameter_value('display_timestamp'),
-                            'max_wifi_bandwidth': self.get_parameter_value('max_wifi_bandwidth')
+                            'max_wifi_bandwidth': self.get_parameter_value('max_wifi_bandwidth'),
+                            'enable_high_res': self.get_parameter_value('enable_high_res')
                         }
                    }
             
@@ -1268,12 +1271,14 @@ class DBConfigHandler:
 
             if 'camera' in config_object:
                 camera_panel = config_object['camera']
-                if not DBConfigHandler.all_keys_present( camera_panel, [ 'timestamp_position', 'display_timestamp', 'max_wifi_bandwidth', 'cameras' ] ):
+                if not DBConfigHandler.all_keys_present( camera_panel, [ 'timestamp_position', 'display_timestamp', 'max_wifi_bandwidth', 'cameras', 'enable_high_res' ] ):
                     return False
 
                 if not isinstance( camera_panel['max_wifi_bandwidth'], ( int, float ) ):
                     return False
                 if not isinstance( camera_panel['timestamp_position'], str ):
+                    return False
+                if not isinstance( camera_panel['enable_high_res'], bool ):
                     return False
 
                 if not isinstance( camera_panel['cameras'], (tuple, list) ):
@@ -1338,6 +1343,8 @@ class DBConfigHandler:
                         self.insert_or_update_parameter( 'display_timestamp', 'bool' , camera_panel['display_timestamp'] )
                     if 'max_wifi_bandwidth' in camera_panel:
                         self.insert_or_update_parameter( 'max_wifi_bandwidth', 'float', float(camera_panel['max_wifi_bandwidth']) )
+                    if 'enable_high_res' in camera_panel:
+                        self.insert_or_update_parameter( 'enable_high_res', 'bool', camera_panel['enable_high_res'] )
                     
     
     def validate_appkey_auth( self, appkey, secret ):
